@@ -1,20 +1,41 @@
 export type NodeRole =
-  | "manual-trigger"
-  | "start-agent"
-  | "worker-agent"
-  | "end-agent"
-  | "console-output";
+  | "trigger"
+  | "start"
+  | "process"
+  | "end"
+  | "tool"
+  | "control"
+  | "output"
+  | "safety"
+  | "memory";
 
-export type RuntimeType = "mock" | "openclaw" | "hermes" | "shell";
+export type NodeType =
+  | "manual.trigger"
+  | "agent.start"
+  | "agent.worker"
+  | "agent.end"
+  | "output.console";
+
+export type RuntimeType =
+  | "mock"
+  | "openclaw"
+  | "hermes"
+  | "codex"
+  | "claude-code"
+  | "shell"
+  | "mcp"
+  | "http"
+  | "custom";
 
 export type RunStatus =
   | "idle"
   | "queued"
   | "running"
-  | "waiting-for-approval"
-  | "succeeded"
+  | "waiting_approval"
+  | "success"
   | "failed"
-  | "cancelled";
+  | "cancelled"
+  | "skipped";
 
 export interface ContextPolicy {
   mode: "none" | "selected" | "upstream" | "custom";
@@ -31,7 +52,7 @@ export interface BudgetPolicy {
 }
 
 export interface RiskPolicy {
-  level: "low" | "medium" | "high";
+  level: "low" | "medium" | "high" | "critical";
   requiresApproval: boolean;
   approvalReason?: string;
 }
@@ -52,10 +73,10 @@ export interface HarnessSpec {
 
 export interface FlowNode {
   id: string;
-  type: string;
+  type: NodeType | string;
   role: NodeRole;
   label: string;
-  runtime: RuntimeType;
+  runtimeRef?: string;
   agent?: AgentSpec;
   harness?: HarnessSpec;
   contextPolicy: ContextPolicy;
@@ -94,10 +115,13 @@ export type RunEventType =
   | "run.completed"
   | "run.failed"
   | "run.cancelled"
+  | "node.input"
   | "node.started"
   | "node.output"
   | "node.completed"
   | "node.failed"
+  | "agent.stream"
+  | "tool.called"
   | "approval.requested";
 
 export interface RunEvent {

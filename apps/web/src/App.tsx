@@ -24,91 +24,101 @@ import type { ReactElement } from "react";
 type CanvasNodeData = Record<string, unknown> & {
   label: string;
   role: string;
-  runtime: string;
+  nodeType: string;
+  runtimeRef: string;
 };
 
 type LibraryNode = {
   name: string;
+  nodeType: string;
   role: string;
-  runtime: string;
+  runtimeRef: string;
   icon: LucideIcon;
 };
 
 const libraryNodes: LibraryNode[] = [
   {
     name: "Manual Trigger",
-    role: "manual-trigger",
-    runtime: "mock",
+    nodeType: "manual.trigger",
+    role: "trigger",
+    runtimeRef: "mock",
     icon: MousePointer2
   },
   {
     name: "Start Agent",
-    role: "start-agent",
-    runtime: "mock",
+    nodeType: "agent.start",
+    role: "start",
+    runtimeRef: "mock",
     icon: Play
   },
   {
     name: "Worker Agent",
-    role: "worker-agent",
-    runtime: "mock",
+    nodeType: "agent.worker",
+    role: "process",
+    runtimeRef: "mock",
     icon: Workflow
   },
   {
     name: "End Agent",
-    role: "end-agent",
-    runtime: "mock",
+    nodeType: "agent.end",
+    role: "end",
+    runtimeRef: "mock",
     icon: CircleStop
   },
   {
     name: "Console Output",
-    role: "console-output",
-    runtime: "mock",
+    nodeType: "output.console",
+    role: "output",
+    runtimeRef: "mock",
     icon: SquareTerminal
   }
 ];
 
 const initialNodes: Node<CanvasNodeData>[] = [
   {
-    id: "manual-trigger",
+    id: "manual.trigger",
     type: "input",
     position: { x: 80, y: 110 },
     data: {
       label: "Manual Trigger",
-      role: "manual-trigger",
-      runtime: "mock"
+      nodeType: "manual.trigger",
+      role: "trigger",
+      runtimeRef: "mock"
     }
   },
   {
-    id: "worker-agent",
+    id: "agent.worker",
     position: { x: 350, y: 110 },
     data: {
       label: "Worker Agent",
-      role: "worker-agent",
-      runtime: "mock"
+      nodeType: "agent.worker",
+      role: "process",
+      runtimeRef: "mock"
     }
   },
   {
-    id: "console-output",
+    id: "output.console",
     type: "output",
     position: { x: 640, y: 110 },
     data: {
       label: "Console Output",
-      role: "console-output",
-      runtime: "mock"
+      nodeType: "output.console",
+      role: "output",
+      runtimeRef: "mock"
     }
   }
 ];
 
 const initialEdges: Edge[] = [
   {
-    id: "edge-manual-worker",
-    source: "manual-trigger",
-    target: "worker-agent"
+    id: "edge.manual.trigger.agent.worker",
+    source: "manual.trigger",
+    target: "agent.worker"
   },
   {
-    id: "edge-worker-console",
-    source: "worker-agent",
-    target: "console-output"
+    id: "edge.agent.worker.output.console",
+    source: "agent.worker",
+    target: "output.console"
   }
 ];
 
@@ -171,7 +181,7 @@ export function App(): ReactElement {
                 <span>
                   <strong>{node.name}</strong>
                   <small>
-                    {node.role} / {node.runtime}
+                    {node.nodeType} / {node.runtimeRef}
                   </small>
                 </span>
               </button>
@@ -204,10 +214,14 @@ export function App(): ReactElement {
           <dl>
             <div>
               <dt>Role</dt>
-              <dd>worker-agent</dd>
+              <dd>process</dd>
             </div>
             <div>
-              <dt>Runtime</dt>
+              <dt>Type</dt>
+              <dd>agent.worker</dd>
+            </div>
+            <div>
+              <dt>Runtime Ref</dt>
               <dd>mock</dd>
             </div>
             <div>
