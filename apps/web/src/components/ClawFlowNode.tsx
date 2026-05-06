@@ -22,7 +22,11 @@ function canSendOutput(role: NodeRole): boolean {
 
 export function ClawFlowNode({ data, selected }: NodeProps<ClawFlowCanvasNode>): ReactElement {
   return (
-    <div className={`flow-node-card role-${data.role} ${selected ? "is-selected" : ""}`}>
+    <div
+      className={`flow-node-card role-${data.role} node-status-${data.status} ${
+        selected ? "is-selected" : ""
+      }`}
+    >
       {canReceiveInput(data.role) ? <Handle type="target" position={Position.Left} /> : null}
 
       <div className="flow-node-header">

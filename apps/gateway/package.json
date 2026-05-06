@@ -5,12 +5,17 @@
   "type": "module",
   "main": "./dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "NODE_OPTIONS=--conditions=development tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@clawflow/adapter-mock": "workspace:*",
+    "@clawflow/flow-engine": "workspace:*",
+    "@clawflow/protocol": "workspace:*",
+    "@fastify/cors": "^11.2.0",
+    "@fastify/websocket": "^11.2.0",
     "fastify": "^5.2.1",
     "pino": "^9.6.0"
   },

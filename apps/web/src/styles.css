@@ -127,10 +127,15 @@ button {
   background: #292724;
 }
 
-.top-actions button:first-child {
+.top-actions .run-action {
   color: #0f1714;
   border-color: #74d6bf;
   background: #74d6bf;
+}
+
+.top-actions button:disabled {
+  cursor: wait;
+  opacity: 0.72;
 }
 
 .node-library,
@@ -299,6 +304,24 @@ button {
   outline-offset: 2px;
 }
 
+.flow-node-card.node-status-running {
+  border-color: #78a7d8;
+  box-shadow:
+    0 16px 28px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(120, 167, 216, 0.32);
+}
+
+.flow-node-card.node-status-success {
+  border-color: #9ccc7a;
+}
+
+.flow-node-card.node-status-failed {
+  border-color: #d97966;
+  box-shadow:
+    0 16px 28px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(217, 121, 102, 0.35);
+}
+
 .flow-node-header {
   display: grid;
   grid-template-columns: 10px minmax(0, 1fr) auto;
@@ -371,6 +394,17 @@ button {
 
 .status-failed {
   background: #d97966;
+}
+
+.status-queued {
+  color: #161513;
+  background: #d6b25e;
+}
+
+.status-cancelled,
+.status-skipped {
+  color: #d8d2c8;
+  background: #4b4740;
 }
 
 .flow-node-meta {
@@ -601,6 +635,100 @@ button {
   color: #a9a197;
   font-size: 12px;
   line-height: 18px;
+}
+
+.run-title {
+  justify-content: space-between;
+}
+
+.run-title span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.run-status {
+  max-width: 120px;
+  overflow: hidden;
+  padding: 2px 8px;
+  border-radius: 999px;
+  color: #d8d2c8;
+  background: #3a3834;
+  font-size: 10px;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-status-running {
+  color: #10100f;
+  background: #78a7d8;
+}
+
+.run-status-success {
+  color: #10100f;
+  background: #9ccc7a;
+}
+
+.run-status-failed {
+  color: #10100f;
+  background: #d97966;
+}
+
+.run-status-queued {
+  color: #10100f;
+  background: #d6b25e;
+}
+
+.run-event-table {
+  height: calc(100% - 38px);
+  overflow: auto;
+  padding: 8px 12px 12px;
+}
+
+.run-event-row {
+  display: grid;
+  grid-template-columns: 94px 132px 190px 86px minmax(240px, 1fr) minmax(260px, 1.1fr);
+  min-width: 1120px;
+  border-bottom: 1px solid #2a2926;
+}
+
+.run-event-row span,
+.run-event-row code {
+  overflow: hidden;
+  padding: 7px 8px;
+  color: #d8d2c8;
+  font-size: 11px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-event-row code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+}
+
+.run-event-head span {
+  color: #9f9a91;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.status-text-running {
+  color: #78a7d8 !important;
+}
+
+.status-text-success {
+  color: #9ccc7a !important;
+}
+
+.status-text-failed {
+  color: #d97966 !important;
+}
+
+.status-text-queued {
+  color: #d6b25e !important;
 }
 
 @media (max-width: 1080px) {

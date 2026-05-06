@@ -1,4 +1,12 @@
-import type { BudgetPolicy, FlowNode, FlowSpec, NodeType, RiskPolicy, RunStatus } from "@clawflow/protocol";
+import type {
+  BudgetPolicy,
+  FlowNode,
+  FlowSpec,
+  NodeType,
+  RiskPolicy,
+  RunEvent,
+  RunStatus
+} from "@clawflow/protocol";
 import { create } from "zustand";
 import { createDefaultFlow, createFlowNode, getCatalogItem } from "../flowCatalog";
 
@@ -15,6 +23,11 @@ export interface FlowStoreState {
   nodeStatuses: Record<string, RunStatus>;
   saveNotice: string | null;
   isExportOpen: boolean;
+  currentRunId: string | null;
+  runEvents: RunEvent[];
+  runStatus: RunStatus;
+  runError: string | null;
+  runWarning: string | null;
   selectNode: (nodeId: string | null) => void;
   addNode: (type: NodeType) => void;
   updateNode: (nodeId: string, patch: EditableNodePatch) => void;
@@ -22,6 +35,11 @@ export interface FlowStoreState {
   markFlowSaved: () => void;
   toggleExport: () => void;
   closeExport: () => void;
+  prepareRun: () => void;
+  acceptRunCreated: (runId: string) => void;
+  appendRunEvent: (event: RunEvent) => void;
+  setRunError: (message: string) => void;
+  setRunWarning: (message: string) => void;
 }
 
 const initialFlow = createDefaultFlow();
@@ -58,12 +76,65 @@ function createAddPosition(existingNodes: FlowNode[]): FlowNode["position"] {
   };
 }
 
+function updateStatusesForRunEvent(
+  event: RunEvent,
+  currentStatuses: Record<string, RunStatus>
+): Record<string, RunStatus> {
+  if (event.nodeId === undefined) {
+    return currentStatuses;
+  }
+
+  if (event.type === "node.started") {
+    return {
+      ...currentStatuses,
+      [event.nodeId]: "running"
+    };
+  }
+
+  if (event.type === "node.completed") {
+    return {
+      ...currentStatuses,
+      [event.nodeId]: "success"
+    };
+  }
+
+  if (event.type === "node.failed") {
+    return {
+      ...currentStatuses,
+      [event.nodeId]: "failed"
+    };
+  }
+
+  return currentStatuses;
+}
+
+function updateRunStatusForEvent(event: RunEvent, currentStatus: RunStatus): RunStatus {
+  if (event.type === "run.started") {
+    return "running";
+  }
+
+  if (event.type === "run.completed") {
+    return "success";
+  }
+
+  if (event.type === "run.failed") {
+    return "failed";
+  }
+
+  return currentStatus;
+}
+
 export const useFlowStore = create<FlowStoreState>((set) => ({
   flow: initialFlow,
   selectedNodeId: initialFlow.nodes[0]?.id ?? null,
   nodeStatuses: createInitialStatuses(initialFlow),
   saveNotice: null,
   isExportOpen: false,
+  currentRunId: null,
+  runEvents: [],
+  runStatus: "idle",
+  runError: null,
+  runWarning: null,
   selectNode: (nodeId) => {
     set({ selectedNodeId: nodeId });
   },
@@ -144,5 +215,51 @@ export const useFlowStore = create<FlowStoreState>((set) => ({
   },
   closeExport: () => {
     set({ isExportOpen: false });
+  },
+  prepareRun: () => {
+    set((state) => ({
+      currentRunId: null,
+      runEvents: [],
+      runStatus: "queued",
+      runError: null,
+      runWarning: null,
+      nodeStatuses: createInitialStatuses(state.flow)
+    }));
+  },
+  acceptRunCreated: (runId) => {
+    set({
+      currentRunId: runId,
+      runStatus: "queued",
+      runError: null,
+      runWarning: null
+    });
+  },
+  appendRunEvent: (event) => {
+    set((state) => {
+      const resetForRunStart = event.type === "run.started";
+      const baseStatuses = resetForRunStart ? createInitialStatuses(state.flow) : state.nodeStatuses;
+      const nextStatuses = updateStatusesForRunEvent(event, baseStatuses);
+      const nextEvents = resetForRunStart ? [event] : [...state.runEvents, event];
+
+      return {
+        currentRunId: event.runId,
+        runEvents: nextEvents,
+        nodeStatuses: nextStatuses,
+        runStatus: updateRunStatusForEvent(event, state.runStatus),
+        runError: event.type === "run.failed" ? event.message : state.runError,
+        runWarning: null
+      };
+    });
+  },
+  setRunError: (message) => {
+    set({
+      runStatus: "failed",
+      runError: message
+    });
+  },
+  setRunWarning: (message) => {
+    set({
+      runWarning: message
+    });
   }
 }));
