@@ -1,5 +1,5 @@
-import type { FlowNode, RuntimeType } from "@clawflow/protocol";
-import type { RuntimeAdapter, RuntimeHealth } from "@clawflow/runtime-registry";
+import type { FlowNode, RuntimeHealth, RuntimeType } from "@clawflow/protocol";
+import type { RuntimeAdapter } from "@clawflow/runtime-registry";
 
 export interface MockRuntimeInput {
   node: FlowNode;
@@ -18,7 +18,7 @@ export class MockRuntimeAdapter implements RuntimeAdapter {
 
   async health(): Promise<RuntimeHealth> {
     return {
-      runtime: this.runtimeType,
+      runtimeId: "mock-local",
       status: "online",
       checkedAt: new Date().toISOString(),
       message: "Mock runtime adapter is online."
@@ -63,7 +63,7 @@ export class MockRuntimeAdapter implements RuntimeAdapter {
         return {
           kind: "agent.worker.output",
           result: `Mock worker completed ${node.label}.`,
-          usedRuntimeRef: node.runtimeRef ?? "mock",
+          usedRuntimeRef: node.runtimeRef ?? "mock-local",
           thinkingLevel: node.budgetPolicy.thinking,
           upstream: input ?? {}
         };

@@ -18,7 +18,14 @@ export interface RunLogEntry {
   timestamp: string;
   level: RunLogLevel;
   message: string;
-  source: "webui" | "gateway" | "websocket" | "flow-validation" | "flow-engine";
+  source:
+    | "webui"
+    | "gateway"
+    | "websocket"
+    | "flow-validation"
+    | "flow-engine"
+    | "runtime-manager"
+    | "runtime-validation";
   eventType?: string;
   nodeId?: string;
   payload?: Record<string, unknown>;

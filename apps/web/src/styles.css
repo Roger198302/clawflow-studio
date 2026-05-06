@@ -246,6 +246,279 @@ button {
   background: #302b27;
 }
 
+.runtime-manager-panel {
+  position: fixed;
+  top: 64px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  display: grid;
+  grid-template-rows: 54px minmax(0, 1fr);
+  width: min(760px, calc(100vw - 32px));
+  border: 1px solid #34322f;
+  border-radius: 8px;
+  background: #1a1a18;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+
+.runtime-manager-body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.runtime-manager-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 0 10px 0 14px;
+  border-bottom: 1px solid #2d2b28;
+  background: #1f1e1c;
+}
+
+.runtime-manager-header > div:first-child {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+
+.runtime-manager-header svg {
+  color: #63c7b2;
+  flex: 0 0 auto;
+}
+
+.runtime-manager-header span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.runtime-manager-header strong {
+  color: #f2ede4;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.runtime-manager-header small {
+  color: #9f9a91;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.runtime-manager-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+}
+
+.runtime-manager-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 9px;
+  color: #ddd8ce;
+  border: 1px solid #34322f;
+  border-radius: 6px;
+  background: #24231f;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.runtime-manager-actions button:hover {
+  border-color: #4d4943;
+  background: #2a2825;
+}
+
+.runtime-manager-actions button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.runtime-manager-error {
+  display: grid;
+  gap: 4px;
+  margin: 10px 12px 0;
+  padding: 10px;
+  border: 1px solid #4a3732;
+  border-radius: 7px;
+  background: rgba(217, 121, 102, 0.08);
+}
+
+.runtime-manager-error strong {
+  color: #ef9a86;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.runtime-manager-error span {
+  color: #d8d2c8;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.runtime-card-list {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.runtime-empty {
+  margin: 0;
+  color: #a9a197;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.runtime-card {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #2f2d2a;
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: #20201e;
+}
+
+.runtime-card.runtime-status-online {
+  border-left-color: #9ccc7a;
+}
+
+.runtime-card.runtime-status-unknown {
+  border-left-color: #d6b25e;
+}
+
+.runtime-card.runtime-status-offline,
+.runtime-card.runtime-status-error {
+  border-left-color: #d97966;
+}
+
+.runtime-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.runtime-card-header div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.runtime-card-header strong {
+  overflow: hidden;
+  color: #f0ebe1;
+  font-size: 13px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-card-header code,
+.runtime-meta-grid code,
+.runtime-capability code {
+  overflow: hidden;
+  color: #d9d3c8;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-status-badge {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  color: #161513;
+  border-radius: 999px;
+  background: #a9a197;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 14px;
+  text-transform: uppercase;
+}
+
+.runtime-status-badge.runtime-status-online {
+  background: #9ccc7a;
+}
+
+.runtime-status-badge.runtime-status-unknown {
+  background: #d6b25e;
+}
+
+.runtime-status-badge.runtime-status-offline,
+.runtime-status-badge.runtime-status-error {
+  background: #d97966;
+}
+
+.runtime-meta-grid {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: 6px 10px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid #2d2b28;
+  border-radius: 7px;
+  background: #1a1a18;
+}
+
+.runtime-meta-grid span {
+  color: #9f9a91;
+  font-size: 10px;
+  line-height: 16px;
+  text-transform: uppercase;
+}
+
+.runtime-description {
+  color: #bdb5aa;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.runtime-capability-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.runtime-capability {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 7px;
+  border: 1px solid #34322f;
+  border-radius: 999px;
+  background: #1b1a18;
+}
+
+.runtime-capability small {
+  color: #9f9a91;
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.runtime-capability.risk-medium {
+  border-color: #5a4b2b;
+}
+
+.runtime-capability.risk-high,
+.runtime-capability.risk-critical {
+  border-color: #5a3832;
+}
+
 .pane-title {
   display: flex;
   align-items: center;
@@ -660,6 +933,21 @@ button {
 .field-control input:focus,
 .field-control select:focus {
   border-color: #74d6bf;
+}
+
+.runtime-select-summary {
+  margin-top: 8px;
+  padding: 8px;
+  color: #a9a197;
+  border: 1px solid #2f2d2a;
+  border-radius: 6px;
+  background: #1a1a18;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.field-error-text {
+  color: #ef9a86;
 }
 
 .readonly-grid {
@@ -1192,5 +1480,22 @@ button {
 
   .run-panel {
     min-height: 180px;
+  }
+
+  .runtime-manager-panel {
+    left: 12px;
+    right: 12px;
+    width: auto;
+  }
+
+  .runtime-manager-header {
+    align-items: flex-start;
+    flex-direction: column;
+    height: auto;
+    padding: 10px;
+  }
+
+  .runtime-manager-actions {
+    flex-wrap: wrap;
   }
 }

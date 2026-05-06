@@ -26,6 +26,9 @@ importers:
       '@clawflow/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@clawflow/runtime-registry':
+        specifier: workspace:*
+        version: link:../../packages/runtime-registry
       '@fastify/cors':
         specifier: ^11.2.0
         version: 11.2.0

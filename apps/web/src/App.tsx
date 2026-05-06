@@ -16,7 +16,8 @@ import type {
   NodeType,
   RiskPolicy,
   RunEvent,
-  RunStatus
+  RunStatus,
+  RuntimeSpec
 } from "@clawflow/protocol";
 import {
   Braces,
@@ -28,20 +29,19 @@ import {
   Plus,
   RotateCcw,
   Save,
+  Server,
   SquareTerminal,
   Workflow,
   X,
   type LucideIcon
 } from "lucide-react";
-import { useCallback, useMemo, useRef, type ChangeEvent, type ReactElement } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ChangeEvent, type ReactElement } from "react";
 import { ClawFlowNode, type ClawFlowNodeData } from "./components/ClawFlowNode";
 import { DismissibleAlert } from "./components/DismissibleAlert";
+import { RuntimeManagerPanel } from "./components/RuntimeManagerPanel";
 import { MVP_NODE_CATALOG } from "./flowCatalog";
-import {
-  useFlowStore,
-  type RunLogEntry,
-  type RunProblemInput
-} from "./store/flowStore";
+import { useFlowStore, type RunProblemInput } from "./store/flowStore";
+import { useRuntimeStore } from "./store/runtimeStore";
 
 const GATEWAY_HTTP_URL = import.meta.env.VITE_GATEWAY_HTTP_URL ?? "http://localhost:8787";
 const STREAM_FIRST_EVENT_TIMEOUT_MS = 5_000;
@@ -136,6 +136,18 @@ export function App(): ReactElement {
   const reportRunWarning = useFlowStore((state) => state.reportRunWarning);
   const dismissRunAlert = useFlowStore((state) => state.dismissRunAlert);
   const clearRun = useFlowStore((state) => state.clearRun);
+  const runtimes = useRuntimeStore((state) => state.runtimes);
+  const runtimeLoadStatus = useRuntimeStore((state) => state.runtimeLoadStatus);
+  const runtimeError = useRuntimeStore((state) => state.runtimeError);
+  const isRuntimeManagerOpen = useRuntimeStore((state) => state.isRuntimeManagerOpen);
+  const openRuntimeManager = useRuntimeStore((state) => state.openRuntimeManager);
+  const closeRuntimeManager = useRuntimeStore((state) => state.closeRuntimeManager);
+  const loadRuntimes = useRuntimeStore((state) => state.loadRuntimes);
+  const healthCheckAll = useRuntimeStore((state) => state.healthCheckAll);
+
+  useEffect(() => {
+    void loadRuntimes();
+  }, [loadRuntimes]);
 
   const selectedNode = useMemo(
     () => flow.nodes.find((node) => node.id === selectedNodeId) ?? null,
@@ -152,7 +164,7 @@ export function App(): ReactElement {
           label: node.label,
           nodeType: node.type,
           role: node.role,
-          runtimeRef: node.runtimeRef ?? "mock",
+          runtimeRef: node.runtimeRef ?? "mock-local",
           status: nodeStatuses[node.id] ?? "idle"
         },
         selected: node.id === selectedNodeId
@@ -193,6 +205,10 @@ export function App(): ReactElement {
     () => runEvents.find((event) => event.id === selectedRunEventId) ?? null,
     [runEvents, selectedRunEventId]
   );
+  const runtimeOptions = useMemo(
+    () => createRuntimeOptions(runtimes, selectedNode?.runtimeRef),
+    [runtimes, selectedNode?.runtimeRef]
+  );
 
   const handleNodesChange = useCallback<OnNodesChange<CanvasNode>>(
     (changes) => {
@@ -210,6 +226,14 @@ export function App(): ReactElement {
     markFlowSaved();
   }, [flow, markFlowSaved]);
 
+  const handleRefreshRuntimes = useCallback(() => {
+    void loadRuntimes();
+  }, [loadRuntimes]);
+
+  const handleRuntimeHealthCheck = useCallback(() => {
+    void healthCheckAll();
+  }, [healthCheckAll]);
+
   const closeActiveSocket = useCallback(() => {
     if (activeSocketRef.current !== null) {
       const socketToClose = activeSocketRef.current;
@@ -220,6 +244,19 @@ export function App(): ReactElement {
 
   const handleRunFlow = useCallback(async () => {
     closeActiveSocket();
+
+    const availableRuntimes = await ensureRuntimeListForRun(runtimes, loadRuntimes);
+    const runtimeValidationProblem = validateRuntimeRefsForRun(
+      flow,
+      availableRuntimes.runtimes,
+      availableRuntimes.error
+    );
+
+    if (runtimeValidationProblem !== null) {
+      clearRun();
+      reportRunError(runtimeValidationProblem);
+      return;
+    }
 
     const validationProblem = validateFlowForRun(flow);
 
@@ -342,9 +379,11 @@ export function App(): ReactElement {
     clearRun,
     closeActiveSocket,
     flow,
+    loadRuntimes,
     prepareRun,
     reportRunError,
-    reportRunWarning
+    reportRunWarning,
+    runtimes
   ]);
 
   const handleClearRun = useCallback(() => {
@@ -362,7 +401,7 @@ export function App(): ReactElement {
   );
 
   const handleRuntimeChange = useCallback(
-    (event: ChangeEvent<HTMLInputElement>) => {
+    (event: ChangeEvent<HTMLSelectElement>) => {
       if (selectedNode !== null) {
         updateNode(selectedNode.id, { runtimeRef: event.target.value });
       }
@@ -416,6 +455,10 @@ export function App(): ReactElement {
             <Braces aria-hidden="true" size={16} />
             Export JSON
           </button>
+          <button type="button" title="Open Runtime Manager" onClick={openRuntimeManager}>
+            <Server aria-hidden="true" size={16} />
+            Runtimes
+          </button>
           <button
             type="button"
             className="run-action"
@@ -436,6 +479,17 @@ export function App(): ReactElement {
           message={runAlert.message}
           suggestion={runAlert.suggestion}
           onClose={dismissRunAlert}
+        />
+      ) : null}
+
+      {isRuntimeManagerOpen ? (
+        <RuntimeManagerPanel
+          runtimes={runtimes}
+          isLoading={runtimeLoadStatus === "loading"}
+          error={runtimeError}
+          onClose={closeRuntimeManager}
+          onRefresh={handleRefreshRuntimes}
+          onHealthCheck={handleRuntimeHealthCheck}
         />
       ) : null}
 
@@ -544,8 +598,29 @@ export function App(): ReactElement {
               <h2>Runtime</h2>
               <label className="field-control">
                 <span>Runtime Ref</span>
-                <input value={selectedNode.runtimeRef ?? ""} onChange={handleRuntimeChange} />
+                <select
+                  value={selectedNode.runtimeRef ?? ""}
+                  onChange={handleRuntimeChange}
+                  disabled={runtimeLoadStatus === "loading" && runtimeOptions.length === 0}
+                >
+                  {selectedNode.role === "trigger" ? <option value="">No runtime</option> : null}
+                  {runtimeOptions.map((runtime) => (
+                    <option key={runtime.id} value={runtime.id}>
+                      {runtime.name} / {runtime.id} / {runtime.status}
+                    </option>
+                  ))}
+                </select>
               </label>
+              <div className="runtime-select-summary">
+                {runtimeError !== null ? (
+                  <span className="field-error-text">{runtimeError}</span>
+                ) : (
+                  <span>
+                    {formatRuntimeSelection(selectedNode.runtimeRef, runtimes) ??
+                      "Runtime registry has not loaded yet."}
+                  </span>
+                )}
+              </div>
             </section>
 
             <section className="inspector-card">
@@ -773,6 +848,104 @@ function extractSocketError(value: unknown): string | null {
   return candidate.error?.message ?? null;
 }
 
+async function ensureRuntimeListForRun(
+  runtimes: RuntimeSpec[],
+  loadRuntimes: () => Promise<RuntimeSpec[]>
+): Promise<{ runtimes: RuntimeSpec[]; error: string | null }> {
+  if (runtimes.length > 0) {
+    return { runtimes, error: null };
+  }
+
+  const loadedRuntimes = await loadRuntimes();
+
+  if (loadedRuntimes.length > 0) {
+    return { runtimes: loadedRuntimes, error: null };
+  }
+
+  return {
+    runtimes: [],
+    error:
+      useRuntimeStore.getState().runtimeError ??
+      "Runtime registry is empty. Please make sure pnpm dev:gateway is running."
+  };
+}
+
+function validateRuntimeRefsForRun(
+  flow: FlowSpec,
+  runtimes: RuntimeSpec[],
+  runtimeError: string | null
+): RunProblemInput | null {
+  if (runtimeError !== null && runtimes.length === 0) {
+    return {
+      title: "Gateway unavailable",
+      message: runtimeError,
+      suggestion: "Please start the local gateway with pnpm dev:gateway and try again.",
+      source: "gateway"
+    };
+  }
+
+  if (runtimes.length === 0) {
+    return {
+      title: "Runtime registry unavailable",
+      message: "No Runtime registry entries are available for validation.",
+      suggestion: "Open Runtime Manager, refresh runtimes, then run the flow again.",
+      source: "runtime-validation"
+    };
+  }
+
+  const runtimesById = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
+  const executableNodes = flow.nodes.filter(requiresRuntimeForMvpRun);
+
+  for (const node of executableNodes) {
+    const runtimeRef = node.runtimeRef?.trim();
+
+    if (runtimeRef === undefined || runtimeRef === "") {
+      return {
+        title: "Runtime selection required",
+        message: `Node "${node.label}" does not have a Runtime selected.`,
+        suggestion: "Select mock-local in the node Inspector before running the flow.",
+        source: "runtime-validation"
+      };
+    }
+
+    if (!runtimesById.has(runtimeRef)) {
+      return {
+        title: "Runtime not found",
+        message: `Runtime ${runtimeRef} is not registered in the current Runtime Manager.`,
+        suggestion: "Refresh Runtime Manager, then select an available Runtime.",
+        source: "runtime-validation"
+      };
+    }
+
+    if (runtimeRef !== "mock-local") {
+      return {
+        title: "Runtime not enabled in MVP",
+        message: `Runtime ${runtimeRef} is registered but execution is not enabled in MVP.`,
+        suggestion: "Select mock-local for agent, tool, and output nodes to run this MVP flow.",
+        source: "runtime-validation"
+      };
+    }
+  }
+
+  return null;
+}
+
+function requiresRuntimeForMvpRun(node: FlowNode): boolean {
+  if (node.role === "trigger") {
+    return false;
+  }
+
+  return (
+    node.role === "start" ||
+    node.role === "process" ||
+    node.role === "end" ||
+    node.role === "tool" ||
+    node.role === "output" ||
+    node.type.startsWith("agent.") ||
+    node.type.startsWith("output.")
+  );
+}
+
 function validateFlowForRun(flow: FlowSpec): RunProblemInput | null {
   if (flow.nodes.length === 0) {
     return createFlowValidationProblem(
@@ -945,6 +1118,42 @@ function findLatestEvent(runEvents: RunEvent[], type: RunEvent["type"]): RunEven
   }
 
   return null;
+}
+
+function createRuntimeOptions(runtimes: RuntimeSpec[], currentRuntimeRef: string | undefined): RuntimeSpec[] {
+  if (
+    currentRuntimeRef === undefined ||
+    currentRuntimeRef === "" ||
+    runtimes.some((runtime) => runtime.id === currentRuntimeRef)
+  ) {
+    return runtimes;
+  }
+
+  return [
+    ...runtimes,
+    {
+      id: currentRuntimeRef,
+      name: `${currentRuntimeRef} (not loaded)`,
+      type: "custom",
+      status: "unknown",
+      capabilities: [],
+      errorMessage: "Runtime is not present in the loaded registry."
+    }
+  ];
+}
+
+function formatRuntimeSelection(runtimeRef: string | undefined, runtimes: RuntimeSpec[]): string | null {
+  if (runtimeRef === undefined || runtimeRef === "") {
+    return "No Runtime selected for this node.";
+  }
+
+  const runtime = runtimes.find((candidate) => candidate.id === runtimeRef);
+
+  if (runtime === undefined) {
+    return `Selected Runtime: ${runtimeRef}. Runtime details are not loaded.`;
+  }
+
+  return `Selected Runtime: ${runtime.name} / ${runtime.type} / ${runtime.status}`;
 }
 
 function formatTimestamp(timestamp: string): string {

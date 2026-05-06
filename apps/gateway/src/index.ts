@@ -2,7 +2,8 @@ import cors from "@fastify/cors";
 import websocket from "@fastify/websocket";
 import { MockRuntimeAdapter } from "@clawflow/adapter-mock";
 import { FlowEngine } from "@clawflow/flow-engine";
-import type { FlowSpec, RunEvent, RunStatus } from "@clawflow/protocol";
+import type { FlowSpec, RunEvent, RunStatus, RuntimeHealth, RuntimeSpec } from "@clawflow/protocol";
+import { RuntimeRegistry } from "@clawflow/runtime-registry";
 import Fastify, { type FastifyInstance, type FastifyReply } from "fastify";
 import { pathToFileURL } from "node:url";
 
@@ -63,6 +64,7 @@ export async function createServer(): Promise<FastifyInstance> {
   const runs = new Map<string, StoredRun>();
   const engine = new FlowEngine();
   const adapter = new MockRuntimeAdapter();
+  const runtimeRegistry = new RuntimeRegistry();
 
   await server.register(cors, {
     origin: true
@@ -93,6 +95,37 @@ export async function createServer(): Promise<FastifyInstance> {
     protocolVersion: PROTOCOL_VERSION,
     runtimeMode: "mock"
   }));
+
+  server.get("/api/runtimes", async (): Promise<RuntimeSpec[]> => runtimeRegistry.listRuntimes());
+
+  server.get<{ Params: { id: string }; Reply: RuntimeSpec | ErrorResponse }>(
+    "/api/runtimes/:id",
+    async (request, reply) => {
+      const runtime = runtimeRegistry.getRuntime(request.params.id);
+
+      if (runtime === undefined) {
+        return sendError(reply, 404, "runtime_not_found", `Runtime not found: ${request.params.id}`);
+      }
+
+      return runtime;
+    }
+  );
+
+  server.get<{ Params: { id: string }; Reply: RuntimeHealth | ErrorResponse }>(
+    "/api/runtimes/:id/health",
+    async (request, reply) => {
+      if (runtimeRegistry.getRuntime(request.params.id) === undefined) {
+        return sendError(reply, 404, "runtime_not_found", `Runtime not found: ${request.params.id}`);
+      }
+
+      return runtimeRegistry.healthCheck(request.params.id);
+    }
+  );
+
+  server.post<{ Reply: RuntimeHealth[] | ErrorResponse }>(
+    "/api/runtimes/health-check",
+    async (): Promise<RuntimeHealth[]> => runtimeRegistry.healthCheckAll()
+  );
 
   server.post<{ Body: unknown; Reply: CreateRunResponse | ErrorResponse }>(
     "/api/runs",

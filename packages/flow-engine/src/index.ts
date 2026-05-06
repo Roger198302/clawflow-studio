@@ -312,7 +312,7 @@ export class FlowEngine {
       nodeId: node.id,
       type: node.type,
       role: node.role,
-      runtimeRef: node.runtimeRef ?? "mock"
+      runtimeRef: node.runtimeRef ?? "mock-local"
     };
   }
 

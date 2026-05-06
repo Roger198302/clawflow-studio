@@ -80,7 +80,7 @@ export function createFlowNode(
     type,
     role: catalogItem.role,
     label: label ?? catalogItem.label,
-    runtimeRef: "mock",
+    runtimeRef: "mock-local",
     contextPolicy: { ...defaultContextPolicy },
     budgetPolicy: { ...defaultBudgetPolicy },
     riskPolicy: { ...defaultRiskPolicy },

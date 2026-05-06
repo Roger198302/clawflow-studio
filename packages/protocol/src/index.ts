@@ -27,6 +27,48 @@ export type RuntimeType =
   | "http"
   | "custom";
 
+export type RuntimeStatus = "online" | "offline" | "unknown" | "error";
+
+export type RuntimeCapabilityKind =
+  | "agent"
+  | "tool"
+  | "trigger"
+  | "output"
+  | "memory"
+  | "control"
+  | "safety";
+
+export interface RuntimeCapability {
+  id: string;
+  name: string;
+  kind: RuntimeCapabilityKind;
+  description?: string;
+  riskLevel: "low" | "medium" | "high" | "critical";
+  inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+}
+
+export interface RuntimeSpec {
+  id: string;
+  name: string;
+  type: RuntimeType;
+  status: RuntimeStatus;
+  endpoint?: string;
+  command?: string;
+  description?: string;
+  capabilities: RuntimeCapability[];
+  lastHealthCheckAt?: string;
+  errorMessage?: string;
+}
+
+export interface RuntimeHealth {
+  runtimeId: string;
+  status: RuntimeStatus;
+  checkedAt: string;
+  latencyMs?: number;
+  message?: string;
+}
+
 export type RunStatus =
   | "idle"
   | "queued"
