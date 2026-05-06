@@ -8,7 +8,16 @@ import {
   type Node,
   type OnNodesChange
 } from "@xyflow/react";
-import type { BudgetPolicy, NodeRole, NodeType, RiskPolicy, RunEvent } from "@clawflow/protocol";
+import type {
+  BudgetPolicy,
+  FlowNode,
+  FlowSpec,
+  NodeRole,
+  NodeType,
+  RiskPolicy,
+  RunEvent,
+  RunStatus
+} from "@clawflow/protocol";
 import {
   Braces,
   CircleStop,
@@ -17,24 +26,25 @@ import {
   MousePointer2,
   Play,
   Plus,
+  RotateCcw,
   Save,
   SquareTerminal,
   Workflow,
   X,
   type LucideIcon
 } from "lucide-react";
-import {
-  useCallback,
-  useMemo,
-  useRef,
-  type ChangeEvent,
-  type ReactElement
-} from "react";
+import { useCallback, useMemo, useRef, type ChangeEvent, type ReactElement } from "react";
 import { ClawFlowNode, type ClawFlowNodeData } from "./components/ClawFlowNode";
+import { DismissibleAlert } from "./components/DismissibleAlert";
 import { MVP_NODE_CATALOG } from "./flowCatalog";
-import { useFlowStore } from "./store/flowStore";
+import {
+  useFlowStore,
+  type RunLogEntry,
+  type RunProblemInput
+} from "./store/flowStore";
 
 const GATEWAY_HTTP_URL = import.meta.env.VITE_GATEWAY_HTTP_URL ?? "http://localhost:8787";
+const STREAM_FIRST_EVENT_TIMEOUT_MS = 5_000;
 
 const nodeTypes = {
   clawflowNode: ClawFlowNode
@@ -78,6 +88,22 @@ interface ErrorResponse {
   };
 }
 
+interface NodeIoView {
+  title: string;
+  inputEvent: RunEvent | null;
+  outputEvent: RunEvent | null;
+  emptyMessage: string;
+}
+
+interface RunSummary {
+  runId: string;
+  status: RunStatus;
+  eventCount: number;
+  succeededNodeCount: number;
+  failedNodeCount: number;
+  durationLabel: string;
+}
+
 export function App(): ReactElement {
   const activeSocketRef = useRef<WebSocket | null>(null);
   const flow = useFlowStore((state) => state.flow);
@@ -87,9 +113,14 @@ export function App(): ReactElement {
   const isExportOpen = useFlowStore((state) => state.isExportOpen);
   const currentRunId = useFlowStore((state) => state.currentRunId);
   const runEvents = useFlowStore((state) => state.runEvents);
+  const runLogs = useFlowStore((state) => state.runLogs);
+  const selectedRunEventId = useFlowStore((state) => state.selectedRunEventId);
   const runStatus = useFlowStore((state) => state.runStatus);
   const runError = useFlowStore((state) => state.runError);
   const runWarning = useFlowStore((state) => state.runWarning);
+  const runAlert = useFlowStore((state) => state.runAlert);
+  const runStartedAt = useFlowStore((state) => state.runStartedAt);
+  const runCompletedAt = useFlowStore((state) => state.runCompletedAt);
   const selectNode = useFlowStore((state) => state.selectNode);
   const addNode = useFlowStore((state) => state.addNode);
   const updateNode = useFlowStore((state) => state.updateNode);
@@ -100,8 +131,11 @@ export function App(): ReactElement {
   const prepareRun = useFlowStore((state) => state.prepareRun);
   const acceptRunCreated = useFlowStore((state) => state.acceptRunCreated);
   const appendRunEvent = useFlowStore((state) => state.appendRunEvent);
-  const setRunError = useFlowStore((state) => state.setRunError);
-  const setRunWarning = useFlowStore((state) => state.setRunWarning);
+  const selectRunEvent = useFlowStore((state) => state.selectRunEvent);
+  const reportRunError = useFlowStore((state) => state.reportRunError);
+  const reportRunWarning = useFlowStore((state) => state.reportRunWarning);
+  const dismissRunAlert = useFlowStore((state) => state.dismissRunAlert);
+  const clearRun = useFlowStore((state) => state.clearRun);
 
   const selectedNode = useMemo(
     () => flow.nodes.find((node) => node.id === selectedNodeId) ?? null,
@@ -145,6 +179,20 @@ export function App(): ReactElement {
 
   const flowJson = useMemo(() => JSON.stringify(flow, null, 2), [flow]);
   const isRunActive = runStatus === "queued" || runStatus === "running";
+  const topStatusSeverity = runError !== null ? "error" : runWarning !== null ? "warning" : runStatus;
+  const topStatusMessage = runError ?? runWarning ?? saveNotice ?? formatRunStatus(runStatus, currentRunId);
+  const runSummary = useMemo<RunSummary>(
+    () => createRunSummary(currentRunId, runStatus, runEvents, nodeStatuses, runStartedAt, runCompletedAt),
+    [currentRunId, nodeStatuses, runCompletedAt, runEvents, runStartedAt, runStatus]
+  );
+  const nodeIoView = useMemo<NodeIoView>(
+    () => createNodeIoView(runEvents, selectedNodeId, selectedNode),
+    [runEvents, selectedNode, selectedNodeId]
+  );
+  const selectedRunEvent = useMemo(
+    () => runEvents.find((event) => event.id === selectedRunEventId) ?? null,
+    [runEvents, selectedRunEventId]
+  );
 
   const handleNodesChange = useCallback<OnNodesChange<CanvasNode>>(
     (changes) => {
@@ -162,11 +210,23 @@ export function App(): ReactElement {
     markFlowSaved();
   }, [flow, markFlowSaved]);
 
-  const handleRunFlow = useCallback(async () => {
+  const closeActiveSocket = useCallback(() => {
     if (activeSocketRef.current !== null) {
       const socketToClose = activeSocketRef.current;
       activeSocketRef.current = null;
       socketToClose.close();
+    }
+  }, []);
+
+  const handleRunFlow = useCallback(async () => {
+    closeActiveSocket();
+
+    const validationProblem = validateFlowForRun(flow);
+
+    if (validationProblem !== null) {
+      clearRun();
+      reportRunError(validationProblem);
+      return;
     }
 
     prepareRun();
@@ -183,53 +243,114 @@ export function App(): ReactElement {
       const body = (await response.json().catch(() => ({}))) as CreateRunResponse & ErrorResponse;
 
       if (!response.ok) {
-        throw new Error(body.error?.message ?? `Gateway returned HTTP ${response.status}.`);
+        reportRunError(createGatewayRejectedProblem(response.status, body.error?.message));
+        return;
       }
 
       if (typeof body.runId !== "string" || typeof body.wsUrl !== "string") {
-        throw new Error("Gateway response did not include runId and wsUrl.");
+        reportRunError({
+          title: "Gateway response invalid",
+          message: "Gateway accepted the run but did not return a valid runId or WebSocket URL.",
+          suggestion: "Restart the local gateway, then run the flow again.",
+          source: "gateway"
+        });
+        return;
       }
 
       acceptRunCreated(body.runId);
 
       const socket = new WebSocket(createWebSocketUrl(body.wsUrl));
       activeSocketRef.current = socket;
+      let streamIssueReported = false;
+      let hasReceivedEvent = false;
+
+      const streamTimeout = window.setTimeout(() => {
+        if (
+          activeSocketRef.current === socket &&
+          !hasReceivedEvent &&
+          !isTerminalRunStatus(useFlowStore.getState().runStatus)
+        ) {
+          reportStreamIssue();
+        }
+      }, STREAM_FIRST_EVENT_TIMEOUT_MS);
+
+      const reportStreamIssue = (): void => {
+        if (streamIssueReported || isTerminalRunStatus(useFlowStore.getState().runStatus)) {
+          return;
+        }
+
+        streamIssueReported = true;
+        reportRunWarning({
+          title: "RunEvent stream interrupted",
+          message: "RunEvent stream disconnected before the run completed.",
+          suggestion: "Check whether the gateway is still running, then run the flow again.",
+          source: "websocket",
+          severity: "warning"
+        });
+      };
 
       socket.onmessage = (messageEvent: MessageEvent<string>) => {
+        hasReceivedEvent = true;
+        window.clearTimeout(streamTimeout);
         const payload = parseSocketPayload(messageEvent.data);
 
         if (isRunEvent(payload)) {
           appendRunEvent(payload);
+
+          if (payload.type === "run.completed" || payload.type === "run.failed") {
+            activeSocketRef.current = null;
+            socket.close();
+          }
+
           return;
         }
 
         const errorMessage = extractSocketError(payload);
 
         if (errorMessage !== null) {
-          setRunError(errorMessage);
+          reportRunError({
+            title: "RunEvent stream error",
+            message: errorMessage,
+            suggestion: "Check the gateway runId and run the flow again.",
+            source: "websocket"
+          });
         }
       };
 
       socket.onerror = () => {
+        window.clearTimeout(streamTimeout);
+
         if (activeSocketRef.current === socket) {
-          setRunWarning("WebSocket connection error while listening for run events.");
+          reportStreamIssue();
         }
       };
 
       socket.onclose = () => {
+        window.clearTimeout(streamTimeout);
+
         if (activeSocketRef.current === socket) {
-          setRunWarning("WebSocket disconnected while listening for run events.");
+          reportStreamIssue();
           activeSocketRef.current = null;
         }
       };
     } catch (error: unknown) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Gateway is unavailable or returned an unreadable error.";
-      setRunError(message);
+      reportRunError(createGatewayUnavailableProblem(error));
     }
-  }, [acceptRunCreated, appendRunEvent, flow, prepareRun, setRunError, setRunWarning]);
+  }, [
+    acceptRunCreated,
+    appendRunEvent,
+    clearRun,
+    closeActiveSocket,
+    flow,
+    prepareRun,
+    reportRunError,
+    reportRunWarning
+  ]);
+
+  const handleClearRun = useCallback(() => {
+    closeActiveSocket();
+    clearRun();
+  }, [clearRun, closeActiveSocket]);
 
   const handleLabelChange = useCallback(
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -282,8 +403,8 @@ export function App(): ReactElement {
           </div>
         </div>
 
-        <div className="top-status" aria-live="polite">
-          {runError ?? runWarning ?? saveNotice ?? formatRunStatus(runStatus, currentRunId)}
+        <div className={`top-status top-status-${topStatusSeverity}`} aria-live="polite">
+          {topStatusMessage}
         </div>
 
         <nav className="top-actions" aria-label="Workspace actions">
@@ -307,6 +428,16 @@ export function App(): ReactElement {
           </button>
         </nav>
       </header>
+
+      {runAlert !== null ? (
+        <DismissibleAlert
+          severity={runAlert.severity}
+          title={runAlert.title}
+          message={runAlert.message}
+          suggestion={runAlert.suggestion}
+          onClose={dismissRunAlert}
+        />
+      ) : null}
 
       <aside className="node-library" aria-label="Node library">
         <div className="pane-title">
@@ -452,61 +583,156 @@ export function App(): ReactElement {
             <Braces aria-hidden="true" size={16} />
             Run Inspector
           </span>
-          <strong className={`run-status run-status-${runStatus}`}>{runStatus}</strong>
+          <div className="run-summary" aria-label="Run summary">
+            <strong className={`run-status run-status-${runSummary.status}`}>{runSummary.status}</strong>
+            <code title={runSummary.runId}>{runSummary.runId}</code>
+            <span>{runSummary.eventCount} events</span>
+            <span>{runSummary.succeededNodeCount} success</span>
+            <span>{runSummary.failedNodeCount} failed</span>
+            <span>{runSummary.durationLabel}</span>
+          </div>
+          <button type="button" className="clear-run-button" onClick={handleClearRun}>
+            <RotateCcw aria-hidden="true" size={14} />
+            Clear Logs
+          </button>
         </div>
 
-        {runEvents.length === 0 ? (
-          <div className="run-empty-layout">
-            <section>
+        <div className="run-inspector-grid">
+          <section className="run-panel run-logs-panel" aria-label="Logs">
+            <div className="run-panel-title">
               <h3>Logs</h3>
-              <p>No run logs yet.</p>
-            </section>
-            <section>
-              <h3>Node IO</h3>
-              <p>No node input or output captured.</p>
-            </section>
-            <section>
-              <h3>Events</h3>
-              <p>No RunEvent stream has started.</p>
-            </section>
-          </div>
-        ) : (
-          <div className="run-event-table" role="table" aria-label="Run events">
-            <div className="run-event-row run-event-head" role="row">
-              <span role="columnheader">Time</span>
-              <span role="columnheader">Event</span>
-              <span role="columnheader">Node</span>
-              <span role="columnheader">Status</span>
-              <span role="columnheader">Message</span>
-              <span role="columnheader">Payload</span>
+              <span>{runLogs.length}</span>
             </div>
 
-            {runEvents.map((event) => (
-              <div className="run-event-row" role="row" key={event.id}>
-                <span role="cell">{formatTimestamp(event.timestamp)}</span>
-                <code role="cell">{event.type}</code>
-                <code role="cell">{event.nodeId ?? "-"}</code>
-                <span role="cell" className={`status-text status-text-${event.status}`}>
-                  {event.status}
-                </span>
-                <span role="cell" title={event.message}>
-                  {event.message}
-                </span>
-                <code role="cell" title={summarizePayload(event.payload, 600)}>
-                  {summarizePayload(event.payload, 120)}
-                </code>
+            {runLogs.length === 0 ? (
+              <p className="run-empty-text">No run logs yet.</p>
+            ) : (
+              <div className="run-log-list">
+                {runLogs.map((log) => (
+                  <article className={`run-log-row log-${log.level}`} key={log.id}>
+                    <time>{formatTimestamp(log.timestamp)}</time>
+                    <strong>{log.level}</strong>
+                    <span title={log.message}>{log.message}</span>
+                  </article>
+                ))}
               </div>
-            ))}
-          </div>
-        )}
+            )}
+          </section>
+
+          <section className="run-panel run-node-io-panel" aria-label="Node IO">
+            <div className="run-panel-title">
+              <h3>Node IO</h3>
+              <span>{nodeIoView.title}</span>
+            </div>
+
+            {nodeIoView.inputEvent === null && nodeIoView.outputEvent === null ? (
+              <p className="run-empty-text">{nodeIoView.emptyMessage}</p>
+            ) : (
+              <div className="node-io-content">
+                <NodeIoBlock title="Input" event={nodeIoView.inputEvent} />
+                <NodeIoBlock title="Output" event={nodeIoView.outputEvent} />
+              </div>
+            )}
+          </section>
+
+          <section className="run-panel run-events-panel" aria-label="Events">
+            <div className="run-panel-title">
+              <h3>Events</h3>
+              <span>{runEvents.length}</span>
+            </div>
+
+            {runEvents.length === 0 ? (
+              <p className="run-empty-text">No RunEvent stream has started.</p>
+            ) : (
+              <div className="event-workspace">
+                <div className="event-list" role="list">
+                  {runEvents.map((event) => {
+                    const isRelated = selectedNodeId !== null && event.nodeId === selectedNodeId;
+                    const isSelected = event.id === selectedRunEventId;
+
+                    return (
+                      <button
+                        className={`event-row ${isSelected ? "is-selected" : ""} ${
+                          isRelated ? "is-related" : ""
+                        }`}
+                        type="button"
+                        key={event.id}
+                        onClick={() => selectRunEvent(event.id)}
+                      >
+                        <code>#{event.sequence}</code>
+                        <code>{event.type}</code>
+                        <code>{event.nodeId ?? "-"}</code>
+                        <span className={`status-text status-text-${event.status}`}>{event.status}</span>
+                        <span title={event.message}>{event.message}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="event-payload-detail">
+                  {selectedRunEvent === null ? (
+                    <p className="run-empty-text">Select an event to inspect its payload.</p>
+                  ) : (
+                    <>
+                      <div className="event-detail-header">
+                        <strong>{selectedRunEvent.type}</strong>
+                        <span>{formatTimestamp(selectedRunEvent.timestamp)}</span>
+                      </div>
+                      <pre>{prettyJson(selectedRunEvent.payload ?? {})}</pre>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </section>
+        </div>
       </section>
     </div>
   );
 }
 
+function NodeIoBlock({
+  title,
+  event
+}: {
+  title: "Input" | "Output";
+  event: RunEvent | null;
+}): ReactElement {
+  if (event === null) {
+    return (
+      <section className="io-block io-empty">
+        <h4>{title}</h4>
+        <p>No {title.toLowerCase()} captured.</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="io-block">
+      <div>
+        <h4>{title}</h4>
+        <span>
+          {event.nodeId ?? "-"} / {formatTimestamp(event.timestamp)}
+        </span>
+      </div>
+      <pre>{prettyJson(event.payload ?? {})}</pre>
+    </section>
+  );
+}
+
 function createWebSocketUrl(wsUrl: string): string {
+  if (wsUrl.startsWith("ws://") || wsUrl.startsWith("wss://")) {
+    return wsUrl;
+  }
+
   const gatewayUrl = new URL(GATEWAY_HTTP_URL);
   const protocol = gatewayUrl.protocol === "https:" ? "wss:" : "ws:";
+
+  if (wsUrl.startsWith("http://") || wsUrl.startsWith("https://")) {
+    const parsedUrl = new URL(wsUrl);
+    const parsedProtocol = parsedUrl.protocol === "https:" ? "wss:" : "ws:";
+    return `${parsedProtocol}//${parsedUrl.host}${parsedUrl.pathname}${parsedUrl.search}`;
+  }
 
   return `${protocol}//${gatewayUrl.host}${wsUrl}`;
 }
@@ -547,8 +773,194 @@ function extractSocketError(value: unknown): string | null {
   return candidate.error?.message ?? null;
 }
 
+function validateFlowForRun(flow: FlowSpec): RunProblemInput | null {
+  if (flow.nodes.length === 0) {
+    return createFlowValidationProblem(
+      "The current flow does not contain any nodes.",
+      "Add a Manual Trigger, connect it to the workflow, and make sure the flow ends with an Output node."
+    );
+  }
+
+  const triggerNodes = flow.nodes.filter((node) => node.role === "trigger");
+  const outputNodes = flow.nodes.filter((node) => node.role === "output");
+
+  if (triggerNodes.length === 0 || outputNodes.length === 0) {
+    return createFlowValidationProblem(
+      "The current flow is missing a required Trigger or Output node.",
+      "Add a Manual Trigger, connect it to the workflow, and make sure the flow ends with an Output node."
+    );
+  }
+
+  if (flow.edges.length === 0) {
+    return createFlowValidationProblem(
+      "The current flow has no executable path because it does not contain any edges.",
+      "Connect the Manual Trigger to the next node, then connect the workflow to an Output node."
+    );
+  }
+
+  if (!hasReachableOutput(flow, triggerNodes, outputNodes)) {
+    return createFlowValidationProblem(
+      "The current flow has no executable path from a Trigger node to an Output node.",
+      "Connect the Manual Trigger through the workflow and end at a Console Output node."
+    );
+  }
+
+  return null;
+}
+
+function createFlowValidationProblem(message: string, suggestion: string): RunProblemInput {
+  return {
+    title: "Flow validation failed",
+    message,
+    suggestion,
+    source: "flow-validation"
+  };
+}
+
+function hasReachableOutput(
+  flow: FlowSpec,
+  triggerNodes: FlowNode[],
+  outputNodes: FlowNode[]
+): boolean {
+  const outputIds = new Set(outputNodes.map((node) => node.id));
+  const outgoingEdges = new Map<string, string[]>();
+
+  for (const edge of flow.edges) {
+    const targets = outgoingEdges.get(edge.source) ?? [];
+    targets.push(edge.target);
+    outgoingEdges.set(edge.source, targets);
+  }
+
+  const queue = triggerNodes.map((node) => node.id);
+  const visited = new Set<string>();
+
+  while (queue.length > 0) {
+    const nodeId = queue.shift();
+
+    if (nodeId === undefined || visited.has(nodeId)) {
+      continue;
+    }
+
+    if (outputIds.has(nodeId)) {
+      return true;
+    }
+
+    visited.add(nodeId);
+    queue.push(...(outgoingEdges.get(nodeId) ?? []));
+  }
+
+  return false;
+}
+
+function createGatewayUnavailableProblem(error: unknown): RunProblemInput {
+  const rawMessage = error instanceof Error ? error.message : "Unable to connect to the gateway.";
+  const isFetchFailure = rawMessage === "Failed to fetch" || rawMessage.includes("fetch");
+  const message = isFetchFailure
+    ? `Gateway unavailable: unable to connect to ${GATEWAY_HTTP_URL}. Please make sure pnpm dev:gateway is running.`
+    : `Gateway unavailable: ${rawMessage}`;
+
+  return {
+    title: "Gateway unavailable",
+    message,
+    suggestion: "Please start the local gateway with pnpm dev:gateway and try again.",
+    source: "gateway"
+  };
+}
+
+function createGatewayRejectedProblem(status: number, message: string | undefined): RunProblemInput {
+  return {
+    title: "Gateway rejected the run",
+    message: message ?? `Gateway returned HTTP ${status} while creating the run.`,
+    suggestion: "Review the flow, make sure the local gateway is healthy, then run again.",
+    source: "gateway"
+  };
+}
+
+function isTerminalRunStatus(status: RunStatus): boolean {
+  return status === "success" || status === "failed" || status === "cancelled" || status === "skipped";
+}
+
+function createRunSummary(
+  runId: string | null,
+  runStatus: RunStatus,
+  runEvents: RunEvent[],
+  nodeStatuses: Record<string, RunStatus>,
+  startedAt: string | null,
+  completedAt: string | null
+): RunSummary {
+  const succeededNodeCount = Object.values(nodeStatuses).filter((status) => status === "success").length;
+  const failedNodeCount = Object.values(nodeStatuses).filter((status) => status === "failed").length;
+  const durationLabel =
+    startedAt === null
+      ? "duration -"
+      : `duration ${formatDurationMs(
+          new Date(completedAt ?? new Date().toISOString()).getTime() - new Date(startedAt).getTime()
+        )}`;
+
+  return {
+    runId: runId ?? "no run",
+    status: runStatus,
+    eventCount: runEvents.length,
+    succeededNodeCount,
+    failedNodeCount,
+    durationLabel
+  };
+}
+
+function createNodeIoView(
+  runEvents: RunEvent[],
+  selectedNodeId: string | null,
+  selectedNode: FlowNode | null
+): NodeIoView {
+  const ioEvents = runEvents.filter((event) => event.type === "node.input" || event.type === "node.output");
+  const scopedEvents =
+    selectedNodeId === null ? ioEvents : ioEvents.filter((event) => event.nodeId === selectedNodeId);
+  const latestInput = findLatestEvent(scopedEvents, "node.input");
+  const latestOutput = findLatestEvent(scopedEvents, "node.output");
+
+  if (selectedNodeId !== null && latestInput === null && latestOutput === null) {
+    return {
+      title: selectedNode?.label ?? selectedNodeId,
+      inputEvent: null,
+      outputEvent: null,
+      emptyMessage: "No input or output has been captured for the selected node."
+    };
+  }
+
+  return {
+    title: selectedNodeId === null ? "Latest global IO" : selectedNode?.label ?? selectedNodeId,
+    inputEvent: latestInput,
+    outputEvent: latestOutput,
+    emptyMessage: "No node input or output captured."
+  };
+}
+
+function findLatestEvent(runEvents: RunEvent[], type: RunEvent["type"]): RunEvent | null {
+  for (let index = runEvents.length - 1; index >= 0; index -= 1) {
+    const event = runEvents[index];
+
+    if (event.type === type) {
+      return event;
+    }
+  }
+
+  return null;
+}
+
 function formatTimestamp(timestamp: string): string {
   return new Date(timestamp).toLocaleTimeString();
+}
+
+function formatDurationMs(durationMs: number): string {
+  if (!Number.isFinite(durationMs) || durationMs < 0) {
+    return "-";
+  }
+
+  if (durationMs < 1_000) {
+    return `${durationMs}ms`;
+  }
+
+  return `${(durationMs / 1_000).toFixed(1)}s`;
 }
 
 function formatRunStatus(status: string, runId: string | null): string {
@@ -559,16 +971,6 @@ function formatRunStatus(status: string, runId: string | null): string {
   return `Run: ${status} / ${runId}`;
 }
 
-function summarizePayload(payload: Record<string, unknown> | undefined, maxLength: number): string {
-  if (payload === undefined) {
-    return "-";
-  }
-
-  const serialized = JSON.stringify(payload);
-
-  if (serialized.length <= maxLength) {
-    return serialized;
-  }
-
-  return `${serialized.slice(0, maxLength - 1)}...`;
+function prettyJson(value: Record<string, unknown>): string {
+  return JSON.stringify(value, null, 2);
 }

@@ -10,6 +10,37 @@ import type {
 import { create } from "zustand";
 import { createDefaultFlow, createFlowNode, getCatalogItem } from "../flowCatalog";
 
+export type RunLogLevel = "info" | "success" | "warning" | "error";
+export type RunAlertSeverity = "warning" | "error";
+
+export interface RunLogEntry {
+  id: string;
+  timestamp: string;
+  level: RunLogLevel;
+  message: string;
+  source: "webui" | "gateway" | "websocket" | "flow-validation" | "flow-engine";
+  eventType?: string;
+  nodeId?: string;
+  payload?: Record<string, unknown>;
+}
+
+export interface RunAlert {
+  id: string;
+  timestamp: string;
+  severity: RunAlertSeverity;
+  title: string;
+  message: string;
+  suggestion: string;
+}
+
+export interface RunProblemInput {
+  title: string;
+  message: string;
+  suggestion: string;
+  source: RunLogEntry["source"];
+  severity?: RunAlertSeverity;
+}
+
 export interface EditableNodePatch {
   label?: string;
   runtimeRef?: string;
@@ -25,9 +56,14 @@ export interface FlowStoreState {
   isExportOpen: boolean;
   currentRunId: string | null;
   runEvents: RunEvent[];
+  runLogs: RunLogEntry[];
+  selectedRunEventId: string | null;
   runStatus: RunStatus;
   runError: string | null;
   runWarning: string | null;
+  runAlert: RunAlert | null;
+  runStartedAt: string | null;
+  runCompletedAt: string | null;
   selectNode: (nodeId: string | null) => void;
   addNode: (type: NodeType) => void;
   updateNode: (nodeId: string, patch: EditableNodePatch) => void;
@@ -38,8 +74,11 @@ export interface FlowStoreState {
   prepareRun: () => void;
   acceptRunCreated: (runId: string) => void;
   appendRunEvent: (event: RunEvent) => void;
-  setRunError: (message: string) => void;
-  setRunWarning: (message: string) => void;
+  selectRunEvent: (eventId: string | null) => void;
+  reportRunError: (problem: RunProblemInput) => void;
+  reportRunWarning: (problem: RunProblemInput) => void;
+  dismissRunAlert: () => void;
+  clearRun: () => void;
 }
 
 const initialFlow = createDefaultFlow();
@@ -124,6 +163,54 @@ function updateRunStatusForEvent(event: RunEvent, currentStatus: RunStatus): Run
   return currentStatus;
 }
 
+function createRunLogFromEvent(event: RunEvent): RunLogEntry | null {
+  if (event.type !== "run.started" && event.type !== "run.completed" && event.type !== "run.failed") {
+    return null;
+  }
+
+  return {
+    id: `log_${event.id}`,
+    timestamp: event.timestamp,
+    level: event.type === "run.failed" ? "error" : event.type === "run.completed" ? "success" : "info",
+    message: event.message,
+    source: "flow-engine",
+    eventType: event.type,
+    payload: event.payload
+  };
+}
+
+function createProblemAlert(problem: RunProblemInput): RunAlert {
+  return {
+    id: createClientId("alert"),
+    timestamp: new Date().toISOString(),
+    severity: problem.severity ?? "error",
+    title: problem.title,
+    message: problem.message,
+    suggestion: problem.suggestion
+  };
+}
+
+function createProblemLog(problem: RunProblemInput, level: RunLogLevel): RunLogEntry {
+  const message = problem.message.startsWith(problem.title)
+    ? problem.message
+    : `${problem.title}: ${problem.message}`;
+
+  return {
+    id: createClientId("log"),
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    source: problem.source,
+    payload: {
+      suggestion: problem.suggestion
+    }
+  };
+}
+
+function createClientId(prefix: string): string {
+  return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export const useFlowStore = create<FlowStoreState>((set) => ({
   flow: initialFlow,
   selectedNodeId: initialFlow.nodes[0]?.id ?? null,
@@ -132,9 +219,14 @@ export const useFlowStore = create<FlowStoreState>((set) => ({
   isExportOpen: false,
   currentRunId: null,
   runEvents: [],
+  runLogs: [],
+  selectedRunEventId: null,
   runStatus: "idle",
   runError: null,
   runWarning: null,
+  runAlert: null,
+  runStartedAt: null,
+  runCompletedAt: null,
   selectNode: (nodeId) => {
     set({ selectedNodeId: nodeId });
   },
@@ -220,9 +312,14 @@ export const useFlowStore = create<FlowStoreState>((set) => ({
     set((state) => ({
       currentRunId: null,
       runEvents: [],
+      runLogs: [],
+      selectedRunEventId: null,
       runStatus: "queued",
       runError: null,
       runWarning: null,
+      runAlert: null,
+      runStartedAt: null,
+      runCompletedAt: null,
       nodeStatuses: createInitialStatuses(state.flow)
     }));
   },
@@ -231,7 +328,8 @@ export const useFlowStore = create<FlowStoreState>((set) => ({
       currentRunId: runId,
       runStatus: "queued",
       runError: null,
-      runWarning: null
+      runWarning: null,
+      runAlert: null
     });
   },
   appendRunEvent: (event) => {
@@ -240,26 +338,89 @@ export const useFlowStore = create<FlowStoreState>((set) => ({
       const baseStatuses = resetForRunStart ? createInitialStatuses(state.flow) : state.nodeStatuses;
       const nextStatuses = updateStatusesForRunEvent(event, baseStatuses);
       const nextEvents = resetForRunStart ? [event] : [...state.runEvents, event];
+      const runLog = createRunLogFromEvent(event);
+      const nextLogs = resetForRunStart
+        ? runLog === null
+          ? []
+          : [runLog]
+        : runLog === null
+          ? state.runLogs
+          : [...state.runLogs, runLog];
+      const nextRunStatus = updateRunStatusForEvent(event, state.runStatus);
+      const isTerminal = event.type === "run.completed" || event.type === "run.failed";
+      const alert =
+        event.type === "run.failed"
+          ? createProblemAlert({
+              title: "Run failed",
+              message: event.message,
+              suggestion: "Review the failing RunEvent payload, fix the flow, then run again.",
+              source: "flow-engine",
+              severity: "error"
+            })
+          : state.runAlert;
 
       return {
         currentRunId: event.runId,
         runEvents: nextEvents,
+        runLogs: nextLogs,
         nodeStatuses: nextStatuses,
-        runStatus: updateRunStatusForEvent(event, state.runStatus),
+        selectedRunEventId: state.selectedRunEventId ?? event.id,
+        runStatus: nextRunStatus,
         runError: event.type === "run.failed" ? event.message : state.runError,
-        runWarning: null
+        runWarning: null,
+        runAlert: alert,
+        runStartedAt: event.type === "run.started" ? event.timestamp : state.runStartedAt,
+        runCompletedAt: isTerminal ? event.timestamp : state.runCompletedAt
       };
     });
   },
-  setRunError: (message) => {
-    set({
-      runStatus: "failed",
-      runError: message
-    });
+  selectRunEvent: (eventId) => {
+    set({ selectedRunEventId: eventId });
   },
-  setRunWarning: (message) => {
-    set({
-      runWarning: message
-    });
+  reportRunError: (problem) => {
+    const normalizedProblem = {
+      ...problem,
+      severity: "error" as const
+    };
+    set((state) => ({
+      runStatus: "failed",
+      runError: problem.message,
+      runWarning: null,
+      runAlert: createProblemAlert(normalizedProblem),
+      runLogs: [...state.runLogs, createProblemLog(normalizedProblem, "error")],
+      runCompletedAt: new Date().toISOString()
+    }));
+  },
+  reportRunWarning: (problem) => {
+    const normalizedProblem = {
+      ...problem,
+      severity: "warning" as const
+    };
+    set((state) => ({
+      runStatus:
+        state.runStatus === "queued" || state.runStatus === "running" ? "failed" : state.runStatus,
+      runWarning: problem.message,
+      runAlert: createProblemAlert(normalizedProblem),
+      runLogs: [...state.runLogs, createProblemLog(normalizedProblem, "warning")],
+      runCompletedAt: new Date().toISOString()
+    }));
+  },
+  dismissRunAlert: () => {
+    set({ runAlert: null });
+  },
+  clearRun: () => {
+    set((state) => ({
+      currentRunId: null,
+      runEvents: [],
+      runLogs: [],
+      selectedRunEventId: null,
+      runStatus: "idle",
+      runError: null,
+      runWarning: null,
+      runAlert: null,
+      runStartedAt: null,
+      runCompletedAt: null,
+      nodeStatuses: createInitialStatuses(state.flow)
+    }));
   }
 }));
