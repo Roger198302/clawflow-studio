@@ -4,6 +4,7 @@ dist/
 build/
 coverage/
 .vite/
+.playwright-cli/
 
 .env
 .env.*
