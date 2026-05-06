@@ -1,0 +1,20 @@
+{
+  "name": "@clawflow/gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "fastify": "^5.2.1",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}
