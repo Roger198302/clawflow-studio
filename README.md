@@ -158,3 +158,4 @@ Future provider placeholders such as CLI, MCP, RAG, ComfyUI, Browser, API, and H
 - [Phase 6C-1 Readiness Validation Report](docs/qa/phase-6c-1-validation-report.md)
 - [Phase 6D-2 Documentation and QA Consolidation](docs/qa/phase-6d-2-documentation-qa-consolidation.md)
 - [Phase 6D-3A Private Beta Readiness](docs/qa/phase-6d-3a-private-beta-readiness.md)
+- [Phase 6E Private Beta Packaging Report](docs/qa/phase-6e-private-beta-packaging-report.md)
