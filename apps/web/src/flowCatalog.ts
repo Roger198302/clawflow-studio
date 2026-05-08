@@ -1,42 +1,68 @@
-import type { BudgetPolicy, ContextPolicy, FlowNode, FlowSpec, NodeRole, NodeType } from "@clawflow/protocol";
+import type {
+  BudgetPolicy,
+  ContextPolicy,
+  FlowNode,
+  FlowSpec,
+  NodeHarnessRef,
+  NodeRole,
+  NodeType
+} from "@clawflow/protocol";
+import { t, type I18nKey, type Locale } from "./i18n";
 
 export interface NodeCatalogItem {
   type: NodeType;
   role: NodeRole;
-  label: string;
-  description: string;
+  labelKey: I18nKey;
+  descriptionKey: I18nKey;
+  defaultHarnessRef?: NodeHarnessRef;
 }
 
 export const MVP_NODE_CATALOG: NodeCatalogItem[] = [
   {
     type: "manual.trigger",
     role: "trigger",
-    label: "Manual Trigger",
-    description: "Entry point for manually starting a flow."
+    labelKey: "node.manualTrigger.label",
+    descriptionKey: "node.manualTrigger.description",
+    defaultHarnessRef: {
+      harnessId: "approval.human",
+      executionMode: "dry_run"
+    }
   },
   {
     type: "agent.start",
     role: "start",
-    label: "Start Agent",
-    description: "Marks the beginning of an agent execution span."
+    labelKey: "node.agentStart.label",
+    descriptionKey: "node.agentStart.description",
+    defaultHarnessRef: {
+      harnessId: "chat.basic",
+      executionMode: "dry_run"
+    }
   },
   {
     type: "agent.worker",
     role: "process",
-    label: "Worker Agent",
-    description: "Represents a mock agent work step."
+    labelKey: "node.agentWorker.label",
+    descriptionKey: "node.agentWorker.description",
+    defaultHarnessRef: {
+      harnessId: "research.agent",
+      executionMode: "dry_run"
+    }
   },
   {
     type: "agent.end",
     role: "end",
-    label: "End Agent",
-    description: "Marks the end of an agent execution span."
+    labelKey: "node.agentEnd.label",
+    descriptionKey: "node.agentEnd.description",
+    defaultHarnessRef: {
+      harnessId: "critic.basic",
+      executionMode: "dry_run"
+    }
   },
   {
     type: "output.console",
     role: "output",
-    label: "Console Output",
-    description: "Displays mock output from upstream nodes."
+    labelKey: "node.outputConsole.label",
+    descriptionKey: "node.outputConsole.description"
   }
 ];
 
@@ -67,6 +93,14 @@ export function getCatalogItem(type: NodeType): NodeCatalogItem {
   return catalogItem;
 }
 
+export function getCatalogLabel(type: NodeType, locale: Locale = "en"): string {
+  return t(locale, getCatalogItem(type).labelKey);
+}
+
+export function getCatalogDescription(type: NodeType, locale: Locale = "en"): string {
+  return t(locale, getCatalogItem(type).descriptionKey);
+}
+
 export function createFlowNode(
   type: NodeType,
   id: string,
@@ -79,8 +113,9 @@ export function createFlowNode(
     id,
     type,
     role: catalogItem.role,
-    label: label ?? catalogItem.label,
+    label: label ?? getCatalogLabel(type, "en"),
     runtimeRef: "mock-local",
+    harnessRef: catalogItem.defaultHarnessRef,
     contextPolicy: { ...defaultContextPolicy },
     budgetPolicy: { ...defaultBudgetPolicy },
     riskPolicy: { ...defaultRiskPolicy },

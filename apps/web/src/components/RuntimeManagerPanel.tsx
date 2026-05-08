@@ -1,9 +1,17 @@
-import type { RuntimeSpec } from "@clawflow/protocol";
+import type {
+  RuntimeCapability,
+  RuntimeExecutionMode,
+  RuntimeHealth,
+  RuntimeSpec
+} from "@clawflow/protocol";
 import { Activity, RefreshCw, Server, X } from "lucide-react";
 import type { ReactElement } from "react";
+import { t, type I18nKey, type Locale } from "../i18n";
 
 export interface RuntimeManagerPanelProps {
   runtimes: RuntimeSpec[];
+  runtimeHealth: Record<string, RuntimeHealth>;
+  locale: Locale;
   isLoading: boolean;
   error: string | null;
   onClose: () => void;
@@ -13,6 +21,8 @@ export interface RuntimeManagerPanelProps {
 
 export function RuntimeManagerPanel({
   runtimes,
+  runtimeHealth,
+  locale,
   isLoading,
   error,
   onClose,
@@ -20,25 +30,27 @@ export function RuntimeManagerPanel({
   onHealthCheck
 }: RuntimeManagerPanelProps): ReactElement {
   return (
-    <aside className="runtime-manager-panel" aria-label="Runtime Manager">
+    <aside className="runtime-manager-panel" aria-label={t(locale, "runtimeManager.aria")}>
       <div className="runtime-manager-header">
         <div>
           <Server aria-hidden="true" size={18} />
           <span>
-            <strong>Runtime Manager</strong>
-            <small>{runtimes.length} registered runtimes</small>
+            <strong>{t(locale, "runtimeManager.title")}</strong>
+            <small>
+              {runtimes.length} {t(locale, "runtimeManager.registeredRuntimes")}
+            </small>
           </span>
         </div>
         <div className="runtime-manager-actions">
           <button type="button" onClick={onRefresh} disabled={isLoading}>
             <RefreshCw aria-hidden="true" size={14} />
-            Refresh
+            {t(locale, "runtimeManager.refresh")}
           </button>
           <button type="button" onClick={onHealthCheck} disabled={isLoading}>
             <Activity aria-hidden="true" size={14} />
-            Health Check
+            {t(locale, "runtimeManager.healthCheck")}
           </button>
-          <button type="button" title="Close Runtime Manager" onClick={onClose}>
+          <button type="button" title={t(locale, "runtimeManager.closeTitle")} onClick={onClose}>
             <X aria-hidden="true" size={16} />
           </button>
         </div>
@@ -47,18 +59,23 @@ export function RuntimeManagerPanel({
       <div className="runtime-manager-body">
         {error !== null ? (
           <div className="runtime-manager-error" role="status">
-            <strong>Gateway unavailable</strong>
+            <strong>{t(locale, "runtimeManager.gatewayUnavailable")}</strong>
             <span>{error}</span>
           </div>
         ) : null}
 
         <div className="runtime-card-list">
           {runtimes.length === 0 && error === null ? (
-            <p className="runtime-empty">No runtimes loaded yet.</p>
+            <p className="runtime-empty">{t(locale, "runtimeManager.empty")}</p>
           ) : null}
 
           {runtimes.map((runtime) => (
-            <RuntimeCard key={runtime.id} runtime={runtime} />
+            <RuntimeCard
+              key={runtime.id}
+              runtime={runtime}
+              health={runtimeHealth[runtime.id]}
+              locale={locale}
+            />
           ))}
         </div>
       </div>
@@ -66,39 +83,64 @@ export function RuntimeManagerPanel({
   );
 }
 
-function RuntimeCard({ runtime }: { runtime: RuntimeSpec }): ReactElement {
+function RuntimeCard({
+  runtime,
+  health,
+  locale
+}: {
+  runtime: RuntimeSpec;
+  health: RuntimeHealth | undefined;
+  locale: Locale;
+}): ReactElement {
+  const status = health?.status ?? runtime.status;
+  const lastHealthCheckAt = health?.checkedAt ?? runtime.lastHealthCheckAt;
+  const message = health?.message ?? runtime.errorMessage ?? t(locale, "common.notAvailable");
+
   return (
-    <article className={`runtime-card runtime-status-${runtime.status}`}>
+    <article className={`runtime-card runtime-status-${status}`}>
       <div className="runtime-card-header">
         <div>
           <strong>{runtime.name}</strong>
           <code>{runtime.id}</code>
         </div>
-        <span className={`runtime-status-badge runtime-status-${runtime.status}`}>{runtime.status}</span>
+        <span className={`runtime-status-badge runtime-status-${status}`}>{status}</span>
       </div>
 
       <div className="runtime-meta-grid">
-        <span>Type</span>
+        <span>{t(locale, "runtimeManager.type")}</span>
         <code>{runtime.type}</code>
-        <span>Endpoint</span>
-        <code>{runtime.endpoint ?? "-"}</code>
-        <span>Command</span>
-        <code>{runtime.command ?? "-"}</code>
-        <span>Capabilities</span>
+        <span>{t(locale, "runtimeManager.executionMode")}</span>
+        <code>{formatExecutionMode(locale, runtime.executionMode)}</code>
+        <span>{t(locale, "runtimeManager.endpoint")}</span>
+        <code>{runtime.endpoint ?? t(locale, "common.notAvailable")}</code>
+        <span>{t(locale, "runtimeManager.command")}</span>
+        <code>{runtime.command ?? t(locale, "common.notAvailable")}</code>
+        <span>{t(locale, "runtimeManager.capabilities")}</span>
         <code>{runtime.capabilities.length}</code>
-        <span>Last Health</span>
-        <code>{runtime.lastHealthCheckAt === undefined ? "-" : formatRuntimeTime(runtime.lastHealthCheckAt)}</code>
-        <span>Error</span>
-        <code title={runtime.errorMessage ?? "-"}>{runtime.errorMessage ?? "-"}</code>
+        <span>{t(locale, "runtimeManager.lastHealth")}</span>
+        <code>
+          {lastHealthCheckAt === undefined
+            ? t(locale, "common.notAvailable")
+            : formatRuntimeTime(lastHealthCheckAt, locale)}
+        </code>
+        <span>{t(locale, "runtimeManager.message")}</span>
+        <code title={message}>{message}</code>
       </div>
 
-      <div className="runtime-description">{runtime.description ?? "No description."}</div>
+      <div className="runtime-description">
+        {runtime.description ?? t(locale, "runtimeManager.noDescription")}
+      </div>
 
       <div className="runtime-capability-list">
         {runtime.capabilities.map((capability) => (
-          <span className={`runtime-capability risk-${capability.riskLevel}`} key={capability.id}>
+          <span
+            className={`runtime-capability risk-${capability.riskLevel} execution-mode-${capability.executionMode}`}
+            key={capability.id}
+            title={formatCapabilityDescription(locale, capability)}
+          >
             <code>{capability.id}</code>
-            <small>{capability.kind}</small>
+            <strong>{formatCapabilityLabel(locale, capability)}</strong>
+            <small>{formatExecutionMode(locale, capability.executionMode)}</small>
           </span>
         ))}
       </div>
@@ -106,6 +148,60 @@ function RuntimeCard({ runtime }: { runtime: RuntimeSpec }): ReactElement {
   );
 }
 
-function formatRuntimeTime(timestamp: string): string {
-  return new Date(timestamp).toLocaleTimeString();
+function formatRuntimeTime(timestamp: string, locale: Locale): string {
+  return new Date(timestamp).toLocaleTimeString(locale);
+}
+
+const executionModeLabelKeys: Record<RuntimeExecutionMode, I18nKey> = {
+  mock: "executionMode.mock",
+  protected: "executionMode.protected",
+  unavailable: "executionMode.unavailable"
+};
+
+const capabilityLabelKeys: Record<string, I18nKey> = {
+  "manual.trigger": "capability.manualTrigger.label",
+  "agent.chat": "capability.agentChat.label",
+  "agent.start": "capability.agentStart.label",
+  "agent.worker": "capability.agentWorker.label",
+  "agent.end": "capability.agentEnd.label",
+  "output.console": "capability.outputConsole.label",
+  "tool.call": "capability.toolCall.label",
+  "gateway.events": "capability.gatewayEvents.label",
+  "canvas.view": "capability.canvasView.label",
+  "browser.control": "capability.browserControl.label",
+  "memory.search": "capability.memorySearch.label",
+  "skill.run": "capability.skillRun.label",
+  "tool.shell": "capability.toolShell.label"
+};
+
+const capabilityDescriptionKeys: Record<string, I18nKey> = {
+  "manual.trigger": "capability.manualTrigger.description",
+  "agent.chat": "capability.agentChat.description",
+  "agent.start": "capability.agentStart.description",
+  "agent.worker": "capability.agentWorker.description",
+  "agent.end": "capability.agentEnd.description",
+  "output.console": "capability.outputConsole.description",
+  "tool.call": "capability.toolCall.description",
+  "gateway.events": "capability.gatewayEvents.description",
+  "canvas.view": "capability.canvasView.description",
+  "browser.control": "capability.browserControl.description",
+  "memory.search": "capability.memorySearch.description",
+  "skill.run": "capability.skillRun.description",
+  "tool.shell": "capability.toolShell.description"
+};
+
+function formatExecutionMode(locale: Locale, mode: RuntimeExecutionMode): string {
+  return t(locale, executionModeLabelKeys[mode]);
+}
+
+function formatCapabilityLabel(locale: Locale, capability: RuntimeCapability): string {
+  const labelKey = capabilityLabelKeys[capability.id];
+  return labelKey === undefined ? capability.name : t(locale, labelKey);
+}
+
+function formatCapabilityDescription(locale: Locale, capability: RuntimeCapability): string {
+  const descriptionKey = capabilityDescriptionKeys[capability.id];
+  return descriptionKey === undefined
+    ? capability.description ?? capability.name
+    : t(locale, descriptionKey);
 }

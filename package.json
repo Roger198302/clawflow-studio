@@ -8,9 +8,12 @@
     "dev:web": "pnpm --filter @clawflow/web dev",
     "dev:gateway": "pnpm --filter @clawflow/gateway dev",
     "build": "pnpm -r build",
-    "typecheck": "pnpm -r typecheck"
+    "typecheck": "pnpm -r typecheck",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^22.10.2",
     "typescript": "^5.7.2"
   },

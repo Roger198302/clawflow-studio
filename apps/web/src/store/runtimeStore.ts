@@ -57,6 +57,7 @@ export const useRuntimeStore = create<RuntimeStoreState>((set, get) => ({
 
       set({
         runtimes: body,
+        runtimeHealth: {},
         runtimeLoadStatus: "success",
         runtimeError: null
       });

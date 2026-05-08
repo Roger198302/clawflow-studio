@@ -1,10 +1,18 @@
+import { OpenClawAdapter, createOpenClawCapabilities } from "@clawflow/adapter-openclaw";
 import type {
   RuntimeCapability,
+  RuntimeExecutionMode,
   RuntimeHealth,
   RuntimeSpec,
   RuntimeStatus,
   RuntimeType
 } from "@clawflow/protocol";
+
+export {
+  evaluateHarnessCompatibility,
+  getHarnessProfile,
+  listHarnessProfiles
+} from "./harnesses.js";
 
 export type RuntimeHealthStatus = RuntimeStatus;
 
@@ -15,9 +23,17 @@ export interface RuntimeAdapter {
 
 export class RuntimeRegistry {
   private readonly runtimes = new Map<string, RuntimeSpec>();
+  private readonly openClawAdapter: OpenClawAdapter;
 
-  constructor(runtimes: RuntimeSpec[] = createDefaultRuntimes()) {
-    for (const runtime of runtimes) {
+  constructor(
+    runtimes?: RuntimeSpec[],
+    openClawAdapter = new OpenClawAdapter({ id: "openclaw-local" })
+  ) {
+    this.openClawAdapter = openClawAdapter;
+
+    const initialRuntimes = runtimes ?? createDefaultRuntimes(openClawAdapter);
+
+    for (const runtime of initialRuntimes) {
       this.registerRuntime(runtime);
     }
   }
@@ -60,22 +76,7 @@ export class RuntimeRegistry {
 
     const startedAt = Date.now();
     const checkedAt = new Date().toISOString();
-    const isMockRuntime = runtime.id === "mock-local" || runtime.type === "mock";
-    const health: RuntimeHealth = isMockRuntime
-      ? {
-          runtimeId: runtime.id,
-          status: "online",
-          checkedAt,
-          latencyMs: Date.now() - startedAt,
-          message: "Mock runtime is online."
-        }
-      : {
-          runtimeId: runtime.id,
-          status: "unknown",
-          checkedAt,
-          latencyMs: Date.now() - startedAt,
-          message: "Not connected in MVP. External Runtime health checks are placeholders only."
-        };
+    const health: RuntimeHealth = await this.createRuntimeHealth(runtime, checkedAt, startedAt);
 
     this.updateRuntimeStatus(
       runtime.id,
@@ -96,22 +97,55 @@ export class RuntimeRegistry {
 
     return results;
   }
+
+  private async createRuntimeHealth(
+    runtime: RuntimeSpec,
+    checkedAt: string,
+    startedAt: number
+  ): Promise<RuntimeHealth> {
+    if (runtime.id === "mock-local" || runtime.type === "mock") {
+      return {
+        runtimeId: runtime.id,
+        status: "online",
+        checkedAt,
+        latencyMs: Date.now() - startedAt,
+        message: "Mock runtime is online."
+      };
+    }
+
+    if (runtime.id === "openclaw-local" || runtime.type === "openclaw") {
+      return this.openClawAdapter.health();
+    }
+
+    return {
+      runtimeId: runtime.id,
+      status: "unknown",
+      checkedAt,
+      latencyMs: Date.now() - startedAt,
+      message: "Not connected in MVP. External Runtime health checks are placeholders only."
+    };
+  }
 }
 
-function createDefaultRuntimes(): RuntimeSpec[] {
+function createDefaultRuntimes(openClawAdapter: OpenClawAdapter): RuntimeSpec[] {
+  const openClawStatusMessage = openClawAdapter.isConfigured
+    ? "OpenClaw endpoint is configured. Run Health Check to verify reachability. Agent execution remains disabled in Phase 5."
+    : openClawAdapter.config.message;
+
   return [
     {
       id: "mock-local",
       name: "Mock Local Runtime",
       type: "mock",
       status: "online",
+      executionMode: "mock",
       description: "In-process MVP runtime used by the Mock Flow Engine.",
       capabilities: [
-        createCapability("agent.chat", "Agent Chat", "agent", "Mock chat-style agent capability."),
-        createCapability("agent.start", "Start Agent", "agent", "Mock start-agent planning capability."),
-        createCapability("agent.worker", "Worker Agent", "agent", "Mock worker execution capability."),
-        createCapability("agent.end", "End Agent", "agent", "Mock agent summarization capability."),
-        createCapability("output.console", "Console Output", "output", "Mock console output sink.")
+        createCapability("manual.trigger", "Manual Trigger", "trigger", "Mock manual trigger input.", "mock"),
+        createCapability("agent.start", "Start Agent", "agent", "Mock start-agent planning capability.", "mock"),
+        createCapability("agent.worker", "Worker Agent", "agent", "Mock worker execution capability.", "mock"),
+        createCapability("agent.end", "End Agent", "agent", "Mock agent summarization capability.", "mock"),
+        createCapability("output.console", "Console Output", "output", "Mock console output sink.", "mock")
       ]
     },
     {
@@ -119,30 +153,24 @@ function createDefaultRuntimes(): RuntimeSpec[] {
       name: "OpenClaw Local Gateway",
       type: "openclaw",
       status: "unknown",
-      endpoint: "ws://127.0.0.1:18789",
-      description: "Placeholder OpenClaw runtime registration. Not connected in the MVP.",
-      capabilities: [
-        createCapability("agent.chat", "Agent Chat", "agent", "Placeholder OpenClaw agent chat."),
-        createCapability("tool.call", "Tool Call", "tool", "Placeholder OpenClaw tool call.", "medium"),
-        createCapability(
-          "gateway.events",
-          "Gateway Events",
-          "control",
-          "Placeholder OpenClaw event stream."
-        )
-      ],
-      errorMessage: "Not connected in MVP."
+      executionMode: "protected",
+      endpoint: openClawAdapter.endpoint,
+      description:
+        "OpenClaw runtime skeleton. Health checks probe endpoint reachability only when CLAWFLOW_OPENCLAW_ENDPOINT is configured; execution is disabled in Phase 5.",
+      capabilities: createOpenClawCapabilities(),
+      errorMessage: openClawStatusMessage
     },
     {
       id: "hermes-local",
       name: "Hermes Local",
       type: "hermes",
       status: "unknown",
+      executionMode: "unavailable",
       description: "Placeholder Hermes runtime registration. Not connected in the MVP.",
       capabilities: [
-        createCapability("agent.chat", "Agent Chat", "agent", "Placeholder Hermes agent chat."),
-        createCapability("memory.search", "Memory Search", "memory", "Placeholder Hermes memory search."),
-        createCapability("skill.run", "Skill Run", "tool", "Placeholder Hermes skill execution.", "medium")
+        createCapability("agent.chat", "Agent Chat", "agent", "Placeholder Hermes agent chat.", "unavailable"),
+        createCapability("memory.search", "Memory Search", "memory", "Placeholder Hermes memory search.", "unavailable"),
+        createCapability("skill.run", "Skill Run", "tool", "Placeholder Hermes skill execution.", "unavailable", "medium")
       ],
       errorMessage: "Not connected in MVP."
     },
@@ -151,9 +179,17 @@ function createDefaultRuntimes(): RuntimeSpec[] {
       name: "Shell Local",
       type: "shell",
       status: "unknown",
+      executionMode: "unavailable",
       description: "Placeholder Shell runtime registration. Shell execution is disabled in the MVP.",
       capabilities: [
-        createCapability("tool.shell", "Shell Tool", "tool", "Placeholder shell tool. Disabled in MVP.", "critical")
+        createCapability(
+          "tool.shell",
+          "Shell Tool",
+          "tool",
+          "Placeholder shell tool. Disabled in MVP.",
+          "unavailable",
+          "critical"
+        )
       ],
       errorMessage: "Not connected in MVP."
     }
@@ -165,12 +201,14 @@ function createCapability(
   name: string,
   kind: RuntimeCapability["kind"],
   description: string,
+  executionMode: RuntimeExecutionMode,
   riskLevel: RuntimeCapability["riskLevel"] = "low"
 ): RuntimeCapability {
   return {
     id,
     name,
     kind,
+    executionMode,
     description,
     riskLevel
   };
