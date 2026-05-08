@@ -10,7 +10,11 @@ const NODE_IDS = {
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
-    window.localStorage.setItem("clawflow.locale", "en");
+    if (window.sessionStorage.getItem("clawflow.e2e.initialized") !== "true") {
+      window.localStorage.setItem("clawflow.locale", "en");
+      window.localStorage.setItem("clawflow.workspaceViewMode", "default");
+      window.sessionStorage.setItem("clawflow.e2e.initialized", "true");
+    }
   });
   await page.goto("/");
   await expect(page.getByTestId("clawflow-canvas")).toBeVisible();
@@ -101,6 +105,65 @@ test("workspace header remains usable across common desktop widths", async ({ pa
       .evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
     expect(summaryFits).toBe(true);
   }
+});
+
+test("workspace view modes hide, restore, and persist layout preferences", async ({ page }) => {
+  const viewModeSelect = page.getByTestId("view-mode-select");
+
+  await expect(viewModeSelect).toHaveValue("default");
+  await expect(page.getByTestId("node-library")).toBeVisible();
+  await expect(page.getByTestId("inspector-pane")).toBeVisible();
+  await expect(page.getByTestId("session-console-panel")).toBeVisible();
+  await expect(page.getByTestId("execution-contract-preview-panel")).toBeVisible();
+  await expect(page.getByTestId("linear-execution-plan-panel")).toBeVisible();
+  await expect(page.getByTestId("resource-estimate-panel")).toBeVisible();
+  await expect(page.getByTestId("run-inspector")).toBeVisible();
+
+  await viewModeSelect.selectOption("focus");
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-mode", "focus");
+  await expect(page.getByTestId("node-library")).toBeHidden();
+  await expect(page.getByTestId("inspector-pane")).toBeHidden();
+  await expect(page.getByTestId("session-console-panel")).toBeHidden();
+  await expect(page.getByTestId("execution-contract-preview-panel")).toBeHidden();
+  await expect(page.getByTestId("linear-execution-plan-panel")).toBeHidden();
+  await expect(page.getByTestId("resource-estimate-panel")).toBeHidden();
+  await expect(page.getByTestId("run-inspector")).toBeHidden();
+  await expect(page.getByTestId("clawflow-canvas")).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-mode", "focus");
+  await expect(page.getByTestId("view-mode-select")).toHaveValue("focus");
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-mode", "default");
+  await expect(page.getByTestId("node-library")).toBeVisible();
+  await expect(page.getByTestId("run-inspector")).toBeVisible();
+
+  await page.getByTestId("view-mode-select").selectOption("run-monitor");
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute(
+    "data-workspace-mode",
+    "run-monitor"
+  );
+  await expect(page.getByTestId("session-console-panel")).toBeVisible();
+  await expect(page.getByTestId("run-inspector")).toBeVisible();
+  await expect(page.getByTestId("node-library")).toBeHidden();
+  await expect(page.getByTestId("inspector-pane")).toBeHidden();
+  await expect(page.getByTestId("execution-contract-preview-panel")).toBeHidden();
+
+  await page.getByTestId("view-mode-select").selectOption("debug");
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-mode", "debug");
+  await expect(page.getByTestId("session-console-panel")).toBeVisible();
+  await expect(page.getByTestId("execution-contract-preview-panel")).toBeVisible();
+  await expect(page.getByTestId("inspector-pane")).toBeVisible();
+  await expect(page.getByTestId("run-inspector")).toBeHidden();
+  await expect(page.getByTestId("linear-execution-plan-panel")).toBeHidden();
+
+  await page.getByTestId("view-mode-select").selectOption("default");
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-mode", "default");
+  await expect(page.getByTestId("node-library")).toBeVisible();
+  await expect(page.getByTestId("linear-execution-plan-panel")).toBeVisible();
+  await expect(page.getByTestId("resource-estimate-panel")).toBeVisible();
+  await expect(page.getByTestId("run-inspector")).toBeVisible();
 });
 
 test("run readiness preview shows localized advisory issues", async ({ page }) => {

@@ -60,7 +60,15 @@ import {
   X,
   type LucideIcon
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, type ChangeEvent, type ReactElement } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ReactElement
+} from "react";
 import { ClawFlowNode, type ClawFlowNodeData } from "./components/ClawFlowNode";
 import { DismissibleAlert } from "./components/DismissibleAlert";
 import { ExecutionContractPreviewPanel } from "./components/ExecutionContractPreviewPanel";
@@ -92,6 +100,16 @@ const nodeTypes = {
 const DEFAULT_SOURCE_HANDLE = "out";
 const DEFAULT_TARGET_HANDLE = "in";
 const PREVIEW_REFRESH_DEBOUNCE_MS = 220;
+const WORKSPACE_VIEW_MODE_STORAGE_KEY = "clawflow.workspaceViewMode";
+const workspaceViewModes = ["default", "focus", "run-monitor", "debug"] as const;
+type WorkspaceViewMode = (typeof workspaceViewModes)[number];
+
+const workspaceViewModeLabelKeys: Record<WorkspaceViewMode, I18nKey> = {
+  default: "workspaceView.default",
+  focus: "workspaceView.focus",
+  "run-monitor": "workspaceView.runMonitor",
+  debug: "workspaceView.debug"
+};
 
 const nodeIcons: Record<NodeType, LucideIcon> = {
   "manual.trigger": MousePointer2,
@@ -147,8 +165,93 @@ interface RunSummary {
   durationLabel: string;
 }
 
+interface WorkspaceVisibility {
+  nodeLibrary: boolean;
+  sessionConsole: boolean;
+  contractPreview: boolean;
+  linearPlan: boolean;
+  resourceEstimate: boolean;
+  inspector: boolean;
+  runInspector: boolean;
+}
+
+function isWorkspaceViewMode(value: string | null): value is WorkspaceViewMode {
+  return workspaceViewModes.some((mode) => mode === value);
+}
+
+function loadStoredWorkspaceViewMode(): WorkspaceViewMode {
+  const storedValue = window.localStorage.getItem(WORKSPACE_VIEW_MODE_STORAGE_KEY);
+
+  return isWorkspaceViewMode(storedValue) ? storedValue : "default";
+}
+
+function storeWorkspaceViewMode(mode: WorkspaceViewMode): void {
+  window.localStorage.setItem(WORKSPACE_VIEW_MODE_STORAGE_KEY, mode);
+}
+
+function isTextEditingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return (
+    target instanceof HTMLInputElement ||
+    target instanceof HTMLTextAreaElement ||
+    target instanceof HTMLSelectElement ||
+    target.isContentEditable
+  );
+}
+
+function createWorkspaceVisibility(mode: WorkspaceViewMode): WorkspaceVisibility {
+  switch (mode) {
+    case "focus":
+      return {
+        nodeLibrary: false,
+        sessionConsole: false,
+        contractPreview: false,
+        linearPlan: false,
+        resourceEstimate: false,
+        inspector: false,
+        runInspector: false
+      };
+    case "run-monitor":
+      return {
+        nodeLibrary: false,
+        sessionConsole: true,
+        contractPreview: false,
+        linearPlan: false,
+        resourceEstimate: false,
+        inspector: false,
+        runInspector: true
+      };
+    case "debug":
+      return {
+        nodeLibrary: false,
+        sessionConsole: true,
+        contractPreview: true,
+        linearPlan: false,
+        resourceEstimate: false,
+        inspector: true,
+        runInspector: false
+      };
+    case "default":
+      return {
+        nodeLibrary: true,
+        sessionConsole: true,
+        contractPreview: true,
+        linearPlan: true,
+        resourceEstimate: true,
+        inspector: true,
+        runInspector: true
+      };
+  }
+}
+
 export function App(): ReactElement {
   const activeSocketRef = useRef<WebSocket | null>(null);
+  const [workspaceViewMode, setWorkspaceViewModeState] = useState<WorkspaceViewMode>(
+    loadStoredWorkspaceViewMode
+  );
   const locale = useLocaleStore((state) => state.locale);
   const setLocale = useLocaleStore((state) => state.setLocale);
   const flow = useFlowStore((state) => state.flow);
@@ -337,6 +440,31 @@ export function App(): ReactElement {
     () => createRuntimeOptions(locale, runtimes, selectedNode?.runtimeRef),
     [locale, runtimes, selectedNode?.runtimeRef]
   );
+  const workspaceVisibility = useMemo(
+    () => createWorkspaceVisibility(workspaceViewMode),
+    [workspaceViewMode]
+  );
+
+  const setWorkspaceViewMode = useCallback((mode: WorkspaceViewMode) => {
+    setWorkspaceViewModeState(mode);
+    storeWorkspaceViewMode(mode);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (
+        event.key === "Escape" &&
+        workspaceViewMode !== "default" &&
+        !isTextEditingTarget(event.target)
+      ) {
+        setWorkspaceViewMode("default");
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [setWorkspaceViewMode, workspaceViewMode]);
 
   const handleNodesChange = useCallback<OnNodesChange<CanvasNode>>(
     (changes) => {
@@ -403,6 +531,13 @@ export function App(): ReactElement {
       setLocale(event.target.value as Locale);
     },
     [setLocale]
+  );
+
+  const handleWorkspaceViewModeChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      setWorkspaceViewMode(event.target.value as WorkspaceViewMode);
+    },
+    [setWorkspaceViewMode]
   );
 
   const closeActiveSocket = useCallback(() => {
@@ -725,7 +860,11 @@ export function App(): ReactElement {
   );
 
   return (
-    <div className="studio-shell">
+    <div
+      className={`studio-shell workspace-mode-${workspaceViewMode}`}
+      data-testid="studio-shell"
+      data-workspace-mode={workspaceViewMode}
+    >
       <header className="top-bar" data-testid="top-bar">
         <div className="brand-lockup" data-testid="brand-lockup">
           <Workflow aria-hidden="true" size={20} />
@@ -747,6 +886,25 @@ export function App(): ReactElement {
         />
 
         <nav className="top-actions" aria-label={t(locale, "top.workspaceActions")} data-testid="workspace-actions">
+          <label
+            className="view-mode-switcher"
+            title={t(locale, "workspaceView.title")}
+            data-testid="view-mode-control"
+          >
+            <span>{t(locale, "workspaceView.label")}</span>
+            <select
+              value={workspaceViewMode}
+              onChange={handleWorkspaceViewModeChange}
+              aria-label={t(locale, "workspaceView.title")}
+              data-testid="view-mode-select"
+            >
+              {workspaceViewModes.map((mode) => (
+                <option key={mode} value={mode}>
+                  {t(locale, workspaceViewModeLabelKeys[mode])}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="language-switcher" title={t(locale, "top.language")}>
             <Languages aria-hidden="true" size={15} />
             <select
@@ -812,68 +970,78 @@ export function App(): ReactElement {
         />
       ) : null}
 
-      <aside className="node-library" aria-label={t(locale, "nodeLibrary.aria")}>
-        <div className="pane-title">
-          <Library aria-hidden="true" size={16} />
-          <span>{t(locale, "nodeLibrary.title")}</span>
-        </div>
+      {workspaceVisibility.nodeLibrary ? (
+        <aside className="node-library" aria-label={t(locale, "nodeLibrary.aria")} data-testid="node-library">
+          <div className="pane-title">
+            <Library aria-hidden="true" size={16} />
+            <span>{t(locale, "nodeLibrary.title")}</span>
+          </div>
 
-        <div className="node-list">
-          {MVP_NODE_CATALOG.map((node) => {
-            const Icon = nodeIcons[node.type];
+          <div className="node-list">
+            {MVP_NODE_CATALOG.map((node) => {
+              const Icon = nodeIcons[node.type];
 
-            return (
-              <button
-                key={node.type}
-                className={`node-list-item role-${node.role}`}
-                data-testid={`node-library-item-${node.type.replaceAll(".", "-")}`}
-                type="button"
-                title={getCatalogDescription(node.type, locale)}
-                onClick={() => addNode(node.type)}
-              >
-                <Icon aria-hidden="true" size={18} />
-                <span>
-                  <strong>{getCatalogLabel(node.type, locale)}</strong>
-                  <small>
-                    {node.type} / {getRoleLabel(locale, node.role)}
-                  </small>
-                </span>
-                <Plus aria-hidden="true" className="node-add-icon" size={16} />
-              </button>
-            );
-          })}
-        </div>
-      </aside>
+              return (
+                <button
+                  key={node.type}
+                  className={`node-list-item role-${node.role}`}
+                  data-testid={`node-library-item-${node.type.replaceAll(".", "-")}`}
+                  type="button"
+                  title={getCatalogDescription(node.type, locale)}
+                  onClick={() => addNode(node.type)}
+                >
+                  <Icon aria-hidden="true" size={18} />
+                  <span>
+                    <strong>{getCatalogLabel(node.type, locale)}</strong>
+                    <small>
+                      {node.type} / {getRoleLabel(locale, node.role)}
+                    </small>
+                  </span>
+                  <Plus aria-hidden="true" className="node-add-icon" size={16} />
+                </button>
+              );
+            })}
+          </div>
+        </aside>
+      ) : null}
 
       <main className="canvas-pane" aria-label={t(locale, "canvas.aria")} data-testid="clawflow-canvas">
-        <SessionConsole
-          locale={locale}
-          flow={flow}
-          isRunActive={isRunActive}
-          onRunSession={handleRunSession}
-        />
-        <ExecutionContractPreviewPanel
-          locale={locale}
-          preview={executionContractPreview}
-          isLoading={executionContractPreviewLoading}
-          error={executionContractPreviewError}
-          onRefresh={handleRefreshExecutionContractPreview}
-        />
-        <LinearExecutionPlanPanel
-          locale={locale}
-          plan={linearExecutionPlan}
-          isLoading={linearExecutionPlanLoading}
-          error={linearExecutionPlanError}
-          liveStepStatuses={livePlanStepStatuses}
-          onRefresh={handleRefreshLinearExecutionPlan}
-        />
-        <ResourceEstimatePanel
-          locale={locale}
-          estimate={flowEstimate}
-          isLoading={flowEstimateLoading}
-          error={flowEstimateError}
-          onRefresh={handleRefreshFlowEstimate}
-        />
+        {workspaceVisibility.sessionConsole ? (
+          <SessionConsole
+            locale={locale}
+            flow={flow}
+            isRunActive={isRunActive}
+            onRunSession={handleRunSession}
+          />
+        ) : null}
+        {workspaceVisibility.contractPreview ? (
+          <ExecutionContractPreviewPanel
+            locale={locale}
+            preview={executionContractPreview}
+            isLoading={executionContractPreviewLoading}
+            error={executionContractPreviewError}
+            onRefresh={handleRefreshExecutionContractPreview}
+          />
+        ) : null}
+        {workspaceVisibility.linearPlan ? (
+          <LinearExecutionPlanPanel
+            locale={locale}
+            plan={linearExecutionPlan}
+            isLoading={linearExecutionPlanLoading}
+            error={linearExecutionPlanError}
+            liveStepStatuses={livePlanStepStatuses}
+            onRefresh={handleRefreshLinearExecutionPlan}
+          />
+        ) : null}
+        {workspaceVisibility.resourceEstimate ? (
+          <ResourceEstimatePanel
+            locale={locale}
+            estimate={flowEstimate}
+            isLoading={flowEstimateLoading}
+            error={flowEstimateError}
+            onRefresh={handleRefreshFlowEstimate}
+          />
+        ) : null}
         <ReactFlow
           data-testid="react-flow-canvas"
           nodes={canvasNodes}
@@ -919,111 +1087,114 @@ export function App(): ReactElement {
         ) : null}
       </main>
 
-      <aside className="inspector-pane" aria-label={t(locale, "inspector.aria")}>
-        <div className="pane-title">
-          <ClipboardList aria-hidden="true" size={16} />
-          <span>{t(locale, "inspector.title")}</span>
-        </div>
-
-        {selectedNode === null ? (
-          <section className="inspector-empty">
-            <strong>{t(locale, "inspector.emptyTitle")}</strong>
-            <span>{t(locale, "inspector.emptyBody")}</span>
-          </section>
-        ) : (
-          <div className="inspector-scroll">
-            <section className="inspector-card">
-              <h2>{t(locale, "inspector.node")}</h2>
-              <div className="field-stack">
-                <label className="field-control">
-                  <span>{t(locale, "inspector.label")}</span>
-                  <input value={selectedNode.label} onChange={handleLabelChange} />
-                </label>
-                <div className="readonly-grid">
-                  <span>{t(locale, "inspector.type")}</span>
-                  <code title={selectedNode.type}>{selectedNode.type}</code>
-                  <span>{t(locale, "inspector.role")}</span>
-                  <code title={selectedNode.role}>{getRoleLabel(locale, selectedNode.role)}</code>
-                  <span>{t(locale, "inspector.status")}</span>
-                  <code title={nodeStatuses[selectedNode.id] ?? "idle"}>
-                    {nodeStatuses[selectedNode.id] ?? "idle"}
-                  </code>
-                </div>
-              </div>
-            </section>
-
-            <section className="inspector-card">
-              <h2>{t(locale, "inspector.runtime")}</h2>
-              <label className="field-control">
-                <span>{t(locale, "inspector.runtimeRef")}</span>
-                <select
-                  value={selectedNode.runtimeRef ?? ""}
-                  onChange={handleRuntimeChange}
-                  disabled={runtimeLoadStatus === "loading" && runtimeOptions.length === 0}
-                >
-                  {selectedNode.role === "trigger" ? (
-                    <option value="">{t(locale, "inspector.noRuntime")}</option>
-                  ) : null}
-                  {runtimeOptions.map((runtime) => (
-                    <option key={runtime.id} value={runtime.id}>
-                      {runtime.name} / {runtime.id} / {runtime.status}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <div className="runtime-select-summary">
-                {runtimeError !== null ? (
-                  <span className="field-error-text">{runtimeError}</span>
-                ) : (
-                  <span>
-                    {formatRuntimeSelection(locale, selectedNode.runtimeRef, runtimes) ??
-                      t(locale, "inspector.runtimeRegistryNotLoaded")}
-                  </span>
-                )}
-              </div>
-            </section>
-
-            <HarnessInspector
-              locale={locale}
-              node={selectedNode}
-              runtimes={runtimes}
-              onChange={handleHarnessChange}
-            />
-
-            <section className="inspector-card">
-              <h2>{t(locale, "inspector.policies")}</h2>
-              <div className="field-stack">
-                <label className="field-control">
-                  <span>{t(locale, "inspector.thinkingLevel")}</span>
-                  <select value={selectedNode.budgetPolicy.thinking} onChange={handleThinkingChange}>
-                    {thinkingLevels.map((level) => (
-                      <option key={level} value={level}>
-                        {level}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field-control">
-                  <span>{t(locale, "inspector.riskLevel")}</span>
-                  <select value={selectedNode.riskPolicy.level} onChange={handleRiskChange}>
-                    {riskLevels.map((level) => (
-                      <option key={level} value={level}>
-                        {level}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-            </section>
+      {workspaceVisibility.inspector ? (
+        <aside className="inspector-pane" aria-label={t(locale, "inspector.aria")} data-testid="inspector-pane">
+          <div className="pane-title">
+            <ClipboardList aria-hidden="true" size={16} />
+            <span>{t(locale, "inspector.title")}</span>
           </div>
-        )}
-      </aside>
 
-      <section
-        className="run-inspector"
-        aria-label={t(locale, "runInspector.aria")}
-        data-testid="run-inspector"
-      >
+          {selectedNode === null ? (
+            <section className="inspector-empty">
+              <strong>{t(locale, "inspector.emptyTitle")}</strong>
+              <span>{t(locale, "inspector.emptyBody")}</span>
+            </section>
+          ) : (
+            <div className="inspector-scroll">
+              <section className="inspector-card">
+                <h2>{t(locale, "inspector.node")}</h2>
+                <div className="field-stack">
+                  <label className="field-control">
+                    <span>{t(locale, "inspector.label")}</span>
+                    <input value={selectedNode.label} onChange={handleLabelChange} />
+                  </label>
+                  <div className="readonly-grid">
+                    <span>{t(locale, "inspector.type")}</span>
+                    <code title={selectedNode.type}>{selectedNode.type}</code>
+                    <span>{t(locale, "inspector.role")}</span>
+                    <code title={selectedNode.role}>{getRoleLabel(locale, selectedNode.role)}</code>
+                    <span>{t(locale, "inspector.status")}</span>
+                    <code title={nodeStatuses[selectedNode.id] ?? "idle"}>
+                      {nodeStatuses[selectedNode.id] ?? "idle"}
+                    </code>
+                  </div>
+                </div>
+              </section>
+
+              <section className="inspector-card">
+                <h2>{t(locale, "inspector.runtime")}</h2>
+                <label className="field-control">
+                  <span>{t(locale, "inspector.runtimeRef")}</span>
+                  <select
+                    value={selectedNode.runtimeRef ?? ""}
+                    onChange={handleRuntimeChange}
+                    disabled={runtimeLoadStatus === "loading" && runtimeOptions.length === 0}
+                  >
+                    {selectedNode.role === "trigger" ? (
+                      <option value="">{t(locale, "inspector.noRuntime")}</option>
+                    ) : null}
+                    {runtimeOptions.map((runtime) => (
+                      <option key={runtime.id} value={runtime.id}>
+                        {runtime.name} / {runtime.id} / {runtime.status}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="runtime-select-summary">
+                  {runtimeError !== null ? (
+                    <span className="field-error-text">{runtimeError}</span>
+                  ) : (
+                    <span>
+                      {formatRuntimeSelection(locale, selectedNode.runtimeRef, runtimes) ??
+                        t(locale, "inspector.runtimeRegistryNotLoaded")}
+                    </span>
+                  )}
+                </div>
+              </section>
+
+              <HarnessInspector
+                locale={locale}
+                node={selectedNode}
+                runtimes={runtimes}
+                onChange={handleHarnessChange}
+              />
+
+              <section className="inspector-card">
+                <h2>{t(locale, "inspector.policies")}</h2>
+                <div className="field-stack">
+                  <label className="field-control">
+                    <span>{t(locale, "inspector.thinkingLevel")}</span>
+                    <select value={selectedNode.budgetPolicy.thinking} onChange={handleThinkingChange}>
+                      {thinkingLevels.map((level) => (
+                        <option key={level} value={level}>
+                          {level}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="field-control">
+                    <span>{t(locale, "inspector.riskLevel")}</span>
+                    <select value={selectedNode.riskPolicy.level} onChange={handleRiskChange}>
+                      {riskLevels.map((level) => (
+                        <option key={level} value={level}>
+                          {level}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+              </section>
+            </div>
+          )}
+        </aside>
+      ) : null}
+
+      {workspaceVisibility.runInspector ? (
+        <section
+          className="run-inspector"
+          aria-label={t(locale, "runInspector.aria")}
+          data-testid="run-inspector"
+        >
         <div className="pane-title run-title">
           <span>
             <Braces aria-hidden="true" size={16} />
@@ -1152,7 +1323,8 @@ export function App(): ReactElement {
             )}
           </section>
         </div>
-      </section>
+        </section>
+      ) : null}
     </div>
   );
 }

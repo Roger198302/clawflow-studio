@@ -329,6 +329,7 @@ button {
   flex: 0 0 auto;
 }
 
+.view-mode-switcher,
 .top-actions button,
 .export-panel-header button {
   display: inline-flex;
@@ -342,6 +343,29 @@ button {
   border-radius: 6px;
   background: #22211f;
   cursor: pointer;
+}
+
+.view-mode-switcher {
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.view-mode-switcher span {
+  color: #aaa39a;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 12px;
+  text-transform: uppercase;
+}
+
+.view-mode-switcher select {
+  max-width: 104px;
+  color: #ddd8ce;
+  border: 0;
+  background: transparent;
+  outline: none;
+  cursor: pointer;
+  font-size: 11px;
 }
 
 .top-actions button:hover,
@@ -432,6 +456,34 @@ button {
   grid-column: 1 / 4;
   border-top: 1px solid #2a2926;
   overflow: hidden;
+}
+
+.workspace-mode-focus {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 52px minmax(0, 1fr);
+}
+
+.workspace-mode-run-monitor {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: 52px minmax(0, 1fr) 300px;
+}
+
+.workspace-mode-debug {
+  grid-template-columns: minmax(0, 1fr) 350px;
+  grid-template-rows: 52px minmax(0, 1fr);
+}
+
+.workspace-mode-focus .top-bar,
+.workspace-mode-run-monitor .top-bar {
+  grid-column: 1 / 2;
+}
+
+.workspace-mode-debug .top-bar {
+  grid-column: 1 / 3;
+}
+
+.workspace-mode-run-monitor .run-inspector {
+  grid-column: 1 / 2;
 }
 
 .dismissible-alert {
@@ -3261,12 +3313,40 @@ button {
     grid-template-columns: 232px minmax(0, 1fr) 300px;
   }
 
+  .top-bar {
+    gap: 8px;
+    padding: 0 12px;
+  }
+
+  .workspace-mode-focus {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 52px minmax(0, 1fr);
+  }
+
+  .workspace-mode-run-monitor {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 52px minmax(0, 1fr) 300px;
+  }
+
+  .workspace-mode-debug {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-rows: 52px minmax(0, 1fr);
+  }
+
   .top-actions > button:not(.run-action) {
     width: 32px;
     padding-right: 0;
     padding-left: 0;
     font-size: 0;
     gap: 0;
+  }
+
+  .view-mode-switcher span {
+    display: none;
+  }
+
+  .view-mode-switcher select {
+    max-width: 88px;
   }
 
   .run-inspector-grid {
@@ -3278,6 +3358,21 @@ button {
   .studio-shell {
     grid-template-columns: 220px minmax(0, 1fr);
     grid-template-rows: 52px minmax(0, 1fr) 330px;
+  }
+
+  .workspace-mode-focus {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 52px minmax(0, 1fr);
+  }
+
+  .workspace-mode-run-monitor {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 52px minmax(0, 1fr) 330px;
+  }
+
+  .workspace-mode-debug {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 52px minmax(0, 1fr);
   }
 
   .top-bar,
@@ -3304,10 +3399,15 @@ button {
     gap: 5px;
   }
 
+  .view-mode-switcher,
   .top-actions button,
   .language-switcher {
     padding-right: 7px;
     padding-left: 7px;
+  }
+
+  .view-mode-switcher select {
+    max-width: 86px;
   }
 
   .run-action-group {
