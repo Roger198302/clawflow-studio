@@ -96,6 +96,7 @@ import {
   formatHarnessRisk
 } from "./harnessUi";
 import { t, type I18nKey, type Locale } from "./i18n";
+import { buildOpenClawTaskExport } from "./openClawTaskExport";
 import { useFlowStore, type RunProblemInput } from "./store/flowStore";
 import { useLocaleStore } from "./store/localeStore";
 import { useRuntimeStore } from "./store/runtimeStore";
@@ -126,6 +127,8 @@ type NodeDisplayMode = (typeof nodeDisplayModes)[number];
 const workspacePresets = ["builder", "runner", "reviewer", "presenter", "custom"] as const;
 type WorkspacePreset = (typeof workspacePresets)[number];
 type CanvasContextMenuKind = "pane" | "node" | "edge";
+type ExportPanelMode = "flow-json" | "openclaw-task";
+type OpenClawTaskCopyStatus = "idle" | "success" | "error";
 
 const workspaceViewModeLabelKeys: Record<WorkspaceViewMode, I18nKey> = {
   default: "workspaceView.default",
@@ -610,6 +613,9 @@ export function App(): ReactElement {
   >({});
   const [contextMenu, setContextMenu] = useState<CanvasContextMenuState | null>(null);
   const [isDemoGuideOpen, setIsDemoGuideOpen] = useState(false);
+  const [exportPanelMode, setExportPanelMode] = useState<ExportPanelMode>("flow-json");
+  const [openClawTaskCopyStatus, setOpenClawTaskCopyStatus] =
+    useState<OpenClawTaskCopyStatus>("idle");
   const locale = useLocaleStore((state) => state.locale);
   const setLocale = useLocaleStore((state) => state.setLocale);
   const flow = useFlowStore((state) => state.flow);
@@ -793,6 +799,15 @@ export function App(): ReactElement {
   );
 
   const flowJson = useMemo(() => JSON.stringify(flow, null, 2), [flow]);
+  const openClawTaskText = useMemo(
+    () =>
+      buildOpenClawTaskExport({
+        flow,
+        linearExecutionPlan,
+        runReadinessReport
+      }),
+    [flow, linearExecutionPlan, runReadinessReport]
+  );
   const isRunActive = runStatus === "queued" || runStatus === "running";
   const topStatusSeverity = runError !== null ? "error" : runWarning !== null ? "warning" : runStatus;
   const topStatusMessage = runError ?? runWarning ?? saveNotice ?? formatRunStatus(locale, runStatus, currentRunId);
@@ -1047,6 +1062,37 @@ export function App(): ReactElement {
   const handleSaveFlow = useCallback(() => {
     markFlowSaved();
   }, [markFlowSaved]);
+
+  const handleToggleFlowExport = useCallback(() => {
+    setExportPanelMode("flow-json");
+    toggleExport();
+  }, [toggleExport]);
+
+  const handleOpenOpenClawTaskExport = useCallback(() => {
+    setExportPanelMode("openclaw-task");
+
+    if (!isExportOpen) {
+      toggleExport();
+    }
+  }, [isExportOpen, toggleExport]);
+
+  const handleCopyOpenClawTask = useCallback(() => {
+    setExportPanelMode("openclaw-task");
+
+    if (!isExportOpen) {
+      toggleExport();
+    }
+
+    if (navigator.clipboard === undefined) {
+      setOpenClawTaskCopyStatus("error");
+      return;
+    }
+
+    void navigator.clipboard
+      .writeText(openClawTaskText)
+      .then(() => setOpenClawTaskCopyStatus("success"))
+      .catch(() => setOpenClawTaskCopyStatus("error"));
+  }, [isExportOpen, openClawTaskText, toggleExport]);
 
   const handleRefreshRuntimes = useCallback(() => {
     void loadRuntimes();
@@ -1781,7 +1827,7 @@ export function App(): ReactElement {
             type="button"
             title={t(locale, "top.exportJsonTitle")}
             data-testid="export-json-button"
-            onClick={toggleExport}
+            onClick={handleToggleFlowExport}
           >
             <Braces aria-hidden="true" size={16} />
             {t(locale, "top.exportJson")}
@@ -1833,9 +1879,12 @@ export function App(): ReactElement {
           locale={locale}
           isLoading={runtimeLoadStatus === "loading"}
           error={runtimeError}
+          openClawTaskCopyStatus={openClawTaskCopyStatus}
           onClose={closeRuntimeManager}
           onRefresh={handleRefreshRuntimes}
           onHealthCheck={handleRuntimeHealthCheck}
+          onCopyOpenClawTask={handleCopyOpenClawTask}
+          onOpenOpenClawTaskExport={handleOpenOpenClawTaskExport}
         />
       ) : null}
 
@@ -2031,16 +2080,46 @@ export function App(): ReactElement {
           <aside className="export-panel" aria-label={t(locale, "export.aria")}>
             <div className="export-panel-header">
               <div>
-                <strong>{t(locale, "export.title")}</strong>
+                <strong>
+                  {exportPanelMode === "openclaw-task"
+                    ? t(locale, "export.openClawTaskTitle")
+                    : t(locale, "export.title")}
+                </strong>
                 <span>
-                  {flow.nodes.length} {t(locale, "common.nodes")}
+                  {exportPanelMode === "openclaw-task"
+                    ? t(locale, "export.openClawTaskSubtitle")
+                    : `${flow.nodes.length} ${t(locale, "common.nodes")}`}
                 </span>
               </div>
               <button type="button" title={t(locale, "export.closeTitle")} onClick={closeExport}>
                 <X aria-hidden="true" size={16} />
               </button>
             </div>
-            <pre>{flowJson}</pre>
+            <div className="export-panel-tabs" role="tablist" aria-label={t(locale, "export.tabs")}>
+              <button
+                type="button"
+                className={exportPanelMode === "flow-json" ? "is-active" : undefined}
+                aria-selected={exportPanelMode === "flow-json"}
+                data-testid="export-tab-flow-json"
+                onClick={() => setExportPanelMode("flow-json")}
+              >
+                {t(locale, "export.flowJson")}
+              </button>
+              <button
+                type="button"
+                className={exportPanelMode === "openclaw-task" ? "is-active" : undefined}
+                aria-selected={exportPanelMode === "openclaw-task"}
+                data-testid="export-tab-openclaw-task"
+                onClick={() => setExportPanelMode("openclaw-task")}
+              >
+                {t(locale, "export.openClawTask")}
+              </button>
+            </div>
+            {exportPanelMode === "openclaw-task" ? (
+              <pre data-testid="openclaw-task-preview">{openClawTaskText}</pre>
+            ) : (
+              <pre data-testid="flow-json-export">{flowJson}</pre>
+            )}
           </aside>
         ) : null}
       </main>
@@ -2137,6 +2216,11 @@ export function App(): ReactElement {
                           t(locale, "inspector.runtimeRegistryNotLoaded")}
                       </span>
                     )}
+                    {selectedNode.runtimeRef === "openclaw-local" ? (
+                      <span className="protected-runtime-note">
+                        {t(locale, "inspector.openClawProtectedOnly")}
+                      </span>
+                    ) : null}
                   </div>
                 </section>
 

@@ -189,6 +189,93 @@ test("demo guide explains the beta path and reset demo flow restores defaults", 
   await expect(page.getByTestId("demo-guide-panel")).toBeHidden();
 });
 
+test("runtime manager shows OpenClaw dogfood boundary and exports manual task", async ({ page }) => {
+  let runRequests = 0;
+  let openClawHealthStatus: "online" | "offline" = "online";
+
+  page.on("request", (request) => {
+    if (request.url().endsWith("/api/runs")) {
+      runRequests += 1;
+    }
+  });
+
+  await page.route("**/api/runtimes/health-check", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify([
+        {
+          runtimeId: "mock-local",
+          status: "online",
+          checkedAt: new Date().toISOString(),
+          latencyMs: 1,
+          message: "Mock runtime is online."
+        },
+        {
+          runtimeId: "openclaw-local",
+          status: openClawHealthStatus,
+          checkedAt: new Date().toISOString(),
+          latencyMs: 3,
+          message:
+            openClawHealthStatus === "online"
+              ? "OpenClaw local health endpoint is reachable in this test. Execution remains blocked."
+              : "OpenClaw local health endpoint is offline in this test."
+        },
+        {
+          runtimeId: "hermes-local",
+          status: "unknown",
+          checkedAt: new Date().toISOString(),
+          latencyMs: 1,
+          message: "Not connected in MVP."
+        },
+        {
+          runtimeId: "shell-local",
+          status: "unknown",
+          checkedAt: new Date().toISOString(),
+          latencyMs: 1,
+          message: "Shell execution is disabled."
+        }
+      ])
+    });
+  });
+
+  await page.getByTestId("runtime-manager-button").evaluate((element) =>
+    element.scrollIntoView({ block: "nearest", inline: "center" })
+  );
+  await page.getByTestId("runtime-manager-button").click();
+
+  await expect(page.getByTestId("runtime-manager-panel")).toBeVisible();
+  await expect(page.getByTestId("runtime-card-mock-local")).toContainText("mock-local");
+  await expect(page.getByTestId("runtime-card-openclaw-local")).toContainText("openclaw-local");
+  await expect(page.getByTestId("runtime-card-hermes-local")).toContainText("hermes-local");
+  await expect(page.getByTestId("runtime-execution-mode-openclaw-local")).toContainText("Protected");
+  await expect(page.getByTestId("openclaw-boundary-copy")).toContainText("Protected");
+  await expect(page.getByTestId("openclaw-boundary-copy")).toContainText("Real OpenClaw Agent and Tool execution remains blocked");
+  await expect(page.getByTestId("openclaw-export-task-button")).toBeVisible();
+  await expect(page.getByTestId("openclaw-copy-task-button")).toBeVisible();
+
+  await page.getByRole("button", { name: "Health Check" }).click();
+  await expect(page.getByTestId("runtime-status-openclaw-local")).toContainText("online");
+  await expect(page.getByTestId("openclaw-dogfood-status")).toContainText("Connected");
+  await expect(page.getByTestId("openclaw-boundary-copy")).toContainText(
+    "Local OpenClaw health endpoint is reachable"
+  );
+
+  openClawHealthStatus = "offline";
+  await page.getByRole("button", { name: "Health Check" }).click();
+  await expect(page.getByTestId("runtime-status-openclaw-local")).toContainText("offline");
+  await expect(page.getByTestId("openclaw-dogfood-status")).toContainText("Unavailable");
+
+  await page.getByTestId("openclaw-export-task-button").click();
+  await expect(page.getByTestId("openclaw-task-preview")).toBeVisible();
+  await expect(page.getByTestId("openclaw-task-preview")).toContainText('"targetRuntimeId": "openclaw-local"');
+  await expect(page.getByTestId("openclaw-task-preview")).toContainText('"realExecutionBlocked": true');
+  await expect(page.getByTestId("openclaw-task-preview")).toContainText('"protectedDryRun": true');
+  await expect(page.getByTestId("openclaw-task-preview")).toContainText("Manual Trigger");
+  await expect(page.getByTestId("openclaw-task-preview")).toContainText("linearExecutionPlan");
+  await expect(page.getByTestId("openclaw-task-preview")).toContainText("readiness");
+  expect(runRequests).toBe(0);
+});
+
 test("first-run empty states give actionable local demo guidance", async ({ page }) => {
   await page.getByLabel("Language").selectOption("en");
 

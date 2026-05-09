@@ -129,7 +129,7 @@ export class RuntimeRegistry {
 
 function createDefaultRuntimes(openClawAdapter: OpenClawAdapter): RuntimeSpec[] {
   const openClawStatusMessage = openClawAdapter.isConfigured
-    ? "OpenClaw endpoint is configured. Run Health Check to verify reachability. Agent execution remains disabled in Phase 5."
+    ? "OpenClaw local health probe is configured. Run Health Check to verify reachability. Agent and Tool execution remain blocked."
     : openClawAdapter.config.message;
 
   return [
@@ -154,9 +154,9 @@ function createDefaultRuntimes(openClawAdapter: OpenClawAdapter): RuntimeSpec[] 
       type: "openclaw",
       status: "unknown",
       executionMode: "protected",
-      endpoint: openClawAdapter.endpoint,
+      endpoint: openClawAdapter.healthEndpoint,
       description:
-        "OpenClaw runtime skeleton. Health checks probe endpoint reachability only when CLAWFLOW_OPENCLAW_ENDPOINT is configured; execution is disabled in Phase 5.",
+        "OpenClaw local dogfood bridge. Health checks probe local reachability only; Agent and Tool execution remain blocked.",
       capabilities: createOpenClawCapabilities(),
       errorMessage: openClawStatusMessage
     },

@@ -32,7 +32,7 @@ Safety boundary:
 - `hermes-local` and unavailable runtimes remain rejected.
 - Local dev services bind to loopback by default.
 - No external agent/tool execution, shell, browser, file, model provider, billing, or pricing API is invoked.
-- Leave `CLAWFLOW_OPENCLAW_ENDPOINT` unset for zero external OpenClaw reachability probes. If configured, `openclaw-local` health checks only probe endpoint reachability and still do not execute agents or tools.
+- Phase 6I local dogfood can probe a local OpenClaw health endpoint through `OPENCLAW_BASE_URL` and `OPENCLAW_HEALTH_PATH`; `openclaw-local` still does not execute agents or tools from ClawFlow Studio.
 
 ## Private Beta / MVP Boundary
 
@@ -160,3 +160,4 @@ Future provider placeholders such as CLI, MCP, RAG, ComfyUI, Browser, API, and H
 - [Phase 6D-2 Documentation and QA Consolidation](docs/qa/phase-6d-2-documentation-qa-consolidation.md)
 - [Phase 6D-3A Private Beta Readiness](docs/qa/phase-6d-3a-private-beta-readiness.md)
 - [Phase 6E Private Beta Packaging Report](docs/qa/phase-6e-private-beta-packaging-report.md)
+- [Local OpenClaw Dogfood Guide](docs/local-openclaw-dogfood.md)

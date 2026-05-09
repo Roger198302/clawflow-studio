@@ -9,17 +9,25 @@ import type {
 } from "@clawflow/protocol";
 
 export const DEFAULT_OPENCLAW_ENDPOINT = "ws://127.0.0.1:18789";
+export const DEFAULT_OPENCLAW_BASE_URL = "http://localhost:18789";
+export const DEFAULT_OPENCLAW_HEALTH_PATH = "/health";
 export const OPENCLAW_ENDPOINT_ENV = "CLAWFLOW_OPENCLAW_ENDPOINT";
+export const OPENCLAW_BASE_URL_ENV = "OPENCLAW_BASE_URL";
+export const OPENCLAW_HEALTH_PATH_ENV = "OPENCLAW_HEALTH_PATH";
 export const OPENCLAW_HEALTH_TIMEOUT_ENV = "CLAWFLOW_OPENCLAW_HEALTH_TIMEOUT_MS";
 const DEFAULT_HEALTH_TIMEOUT_MS = 1_500;
 
 export interface OpenClawEnvironment {
+  readonly OPENCLAW_BASE_URL?: string;
+  readonly OPENCLAW_HEALTH_PATH?: string;
   readonly CLAWFLOW_OPENCLAW_ENDPOINT?: string;
   readonly CLAWFLOW_OPENCLAW_HEALTH_TIMEOUT_MS?: string;
 }
 
 export interface OpenClawAdapterOptions {
   id?: string;
+  baseUrl?: string;
+  healthPath?: string;
   endpoint?: string;
   healthTimeoutMs?: number;
   env?: OpenClawEnvironment;
@@ -31,6 +39,11 @@ export interface OpenClawAdapterConfig {
   endpoint: string;
   endpointConfigured: boolean;
   endpointSource: "options" | "environment" | "default";
+  baseUrl: string;
+  healthPath: string;
+  healthUrl: string;
+  healthMode: "http" | "websocket";
+  healthSource: "options" | "environment" | "default" | "legacy";
   healthTimeoutMs: number;
   message: string;
 }
@@ -39,6 +52,7 @@ export class OpenClawAdapter {
   readonly id: string;
   readonly type: Extract<RuntimeType, "openclaw"> = "openclaw";
   readonly endpoint: string;
+  readonly healthEndpoint: string;
   readonly config: OpenClawAdapterConfig;
   private readonly healthTimeoutMs: number;
   private socket: WebSocket | null = null;
@@ -50,11 +64,12 @@ export class OpenClawAdapter {
     this.id = options.id ?? "openclaw-local";
     this.config = config;
     this.endpoint = config.endpoint;
+    this.healthEndpoint = config.healthMode === "http" ? config.healthUrl : config.endpoint;
     this.healthTimeoutMs = config.healthTimeoutMs;
   }
 
   get isConfigured(): boolean {
-    return this.config.endpointConfigured;
+    return this.config.healthMode === "http" || this.config.endpointConfigured;
   }
 
   async connect(): Promise<void> {
@@ -80,14 +95,8 @@ export class OpenClawAdapter {
   async health(): Promise<RuntimeHealth> {
     const startedAt = Date.now();
 
-    if (!this.config.endpointConfigured) {
-      return {
-        runtimeId: this.id,
-        status: "unknown",
-        checkedAt: new Date().toISOString(),
-        latencyMs: Date.now() - startedAt,
-        message: this.config.message
-      };
+    if (this.config.healthMode === "http") {
+      return this.healthHttp(startedAt);
     }
 
     try {
@@ -100,7 +109,7 @@ export class OpenClawAdapter {
         checkedAt: new Date().toISOString(),
         latencyMs: Date.now() - startedAt,
         message:
-          "OpenClaw endpoint is reachable. Protocol handshake and Agent execution are not enabled in Phase 5."
+          "OpenClaw endpoint is reachable. Clawflow Studio still blocks real Agent and Tool execution in Phase 6I."
       };
     } catch (error: unknown) {
       return {
@@ -113,16 +122,75 @@ export class OpenClawAdapter {
     }
   }
 
+  private async healthHttp(startedAt: number): Promise<RuntimeHealth> {
+    let healthUrl: URL;
+
+    try {
+      healthUrl = validateHttpHealthUrl(this.config.healthUrl);
+    } catch (error: unknown) {
+      return {
+        runtimeId: this.id,
+        status: "error",
+        checkedAt: new Date().toISOString(),
+        latencyMs: Date.now() - startedAt,
+        message: formatHealthError(error)
+      };
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => {
+      controller.abort();
+    }, this.healthTimeoutMs);
+
+    try {
+      const response = await fetch(healthUrl, {
+        method: "GET",
+        signal: controller.signal
+      });
+
+      if (response.ok) {
+        return {
+          runtimeId: this.id,
+          status: "online",
+          checkedAt: new Date().toISOString(),
+          latencyMs: Date.now() - startedAt,
+          message:
+            "OpenClaw local health endpoint is reachable. Clawflow Studio still blocks real Agent and Tool execution in Phase 6I."
+        };
+      }
+
+      return {
+        runtimeId: this.id,
+        status: "offline",
+        checkedAt: new Date().toISOString(),
+        latencyMs: Date.now() - startedAt,
+        message: `OpenClaw local health endpoint returned HTTP ${response.status}: ${healthUrl.toString()}`
+      };
+    } catch (error: unknown) {
+      return {
+        runtimeId: this.id,
+        status: isAbortError(error) ? "offline" : "offline",
+        checkedAt: new Date().toISOString(),
+        latencyMs: Date.now() - startedAt,
+        message: isAbortError(error)
+          ? `OpenClaw local health check timed out after ${this.healthTimeoutMs}ms: ${healthUrl.toString()}`
+          : `OpenClaw local health endpoint is offline or unreachable: ${healthUrl.toString()}`
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async listCapabilities(): Promise<RuntimeCapability[]> {
     return createOpenClawCapabilities();
   }
 
   async invokeAgent(_input: AgentInvokeInput): Promise<AgentInvokeResult> {
-    throw new Error("OpenClaw Agent invocation is not implemented in Phase 5.");
+    throw new Error("OpenClaw Agent invocation is protected and not enabled in Phase 6I.");
   }
 
   async invokeTool(_input: ToolInvokeInput): Promise<ToolInvokeResult> {
-    throw new Error("OpenClaw Tool invocation is not implemented in Phase 5.");
+    throw new Error("OpenClaw Tool invocation is protected and not enabled in Phase 6I.");
   }
 
   subscribeEvents(handler: OpenClawEventHandler): () => void {
@@ -221,7 +289,7 @@ export class OpenClawAdapter {
 export const openClawAdapterStatus = {
   runtimeType: "openclaw",
   status: "skeleton",
-  reason: "OpenClaw health probing is available; Agent and Tool execution are disabled in Phase 5."
+  reason: "OpenClaw health probing is available; Agent and Tool execution are blocked in Phase 6I."
 } as const;
 
 export function createOpenClawCapabilities(): RuntimeCapability[] {
@@ -231,7 +299,7 @@ export function createOpenClawCapabilities(): RuntimeCapability[] {
       name: "Agent Chat",
       kind: "agent",
       executionMode: "protected",
-      description: "OpenClaw agent chat placeholder. Execution disabled in Phase 5.",
+      description: "OpenClaw agent chat placeholder. Real execution blocked in Phase 6I.",
       riskLevel: "low"
     },
     {
@@ -239,7 +307,7 @@ export function createOpenClawCapabilities(): RuntimeCapability[] {
       name: "Tool Call",
       kind: "tool",
       executionMode: "protected",
-      description: "OpenClaw tool call placeholder. Execution disabled in Phase 5.",
+      description: "OpenClaw tool call placeholder. Real execution blocked in Phase 6I.",
       riskLevel: "medium"
     },
     {
@@ -255,7 +323,7 @@ export function createOpenClawCapabilities(): RuntimeCapability[] {
       name: "Canvas View",
       kind: "control",
       executionMode: "protected",
-      description: "OpenClaw canvas visibility placeholder. Dynamic discovery disabled in Phase 5.",
+      description: "OpenClaw canvas visibility placeholder. Dynamic discovery blocked in Phase 6I.",
       riskLevel: "low"
     },
     {
@@ -263,7 +331,7 @@ export function createOpenClawCapabilities(): RuntimeCapability[] {
       name: "Browser Control",
       kind: "tool",
       executionMode: "protected",
-      description: "OpenClaw browser control placeholder. Execution disabled in Phase 5.",
+      description: "OpenClaw browser control placeholder. Real execution blocked in Phase 6I.",
       riskLevel: "high"
     }
   ];
@@ -293,24 +361,50 @@ function readErrorMessage(error: unknown): string {
 
 export function createOpenClawAdapterConfig(options: OpenClawAdapterOptions): OpenClawAdapterConfig {
   const env = options.env ?? readOpenClawEnvironment();
+  const optionBaseUrl = normalizeEnvString(options.baseUrl);
+  const envBaseUrl = normalizeEnvString(env.OPENCLAW_BASE_URL);
+  const optionHealthPath = normalizeEnvString(options.healthPath);
+  const envHealthPath = normalizeEnvString(env.OPENCLAW_HEALTH_PATH);
   const optionEndpoint = normalizeEnvString(options.endpoint);
   const envEndpoint = normalizeEnvString(env.CLAWFLOW_OPENCLAW_ENDPOINT);
   const endpoint = optionEndpoint ?? envEndpoint ?? DEFAULT_OPENCLAW_ENDPOINT;
   const endpointConfigured = optionEndpoint !== undefined || envEndpoint !== undefined;
   const endpointSource =
     optionEndpoint !== undefined ? "options" : envEndpoint !== undefined ? "environment" : "default";
+  const shouldUseLegacyWebSocketHealth =
+    optionBaseUrl === undefined &&
+    envBaseUrl === undefined &&
+    (optionEndpoint !== undefined || envEndpoint !== undefined);
+  const baseUrl = optionBaseUrl ?? envBaseUrl ?? DEFAULT_OPENCLAW_BASE_URL;
+  const healthPath = normalizeHealthPath(optionHealthPath ?? envHealthPath ?? DEFAULT_OPENCLAW_HEALTH_PATH);
+  const healthSource =
+    optionBaseUrl !== undefined
+      ? "options"
+      : envBaseUrl !== undefined
+        ? "environment"
+        : shouldUseLegacyWebSocketHealth
+          ? "legacy"
+          : "default";
+  const healthMode = shouldUseLegacyWebSocketHealth ? "websocket" : "http";
+  const healthUrl = createHttpHealthUrl(baseUrl, healthPath);
   const healthTimeoutMs =
     normalizePositiveInteger(options.healthTimeoutMs) ??
     parsePositiveInteger(env.CLAWFLOW_OPENCLAW_HEALTH_TIMEOUT_MS) ??
     DEFAULT_HEALTH_TIMEOUT_MS;
-  const message = endpointConfigured
-    ? `OpenClaw endpoint configured from ${endpointSource}. Run Health Check to verify reachability.`
-    : `OpenClaw endpoint is not configured. Set ${OPENCLAW_ENDPOINT_ENV} to enable OpenClaw health checks. Default endpoint: ${DEFAULT_OPENCLAW_ENDPOINT}.`;
+  const message =
+    healthMode === "http"
+      ? `OpenClaw local health probe uses ${healthUrl}. Set ${OPENCLAW_BASE_URL_ENV} and ${OPENCLAW_HEALTH_PATH_ENV} to change it. Real execution remains protected.`
+      : `OpenClaw legacy WebSocket endpoint configured from ${endpointSource}. Run Health Check to verify reachability. Real execution remains protected.`;
 
   return {
     endpoint,
     endpointConfigured,
     endpointSource,
+    baseUrl,
+    healthPath,
+    healthUrl,
+    healthMode,
+    healthSource,
     healthTimeoutMs,
     message
   };
@@ -320,6 +414,8 @@ function readOpenClawEnvironment(): OpenClawEnvironment {
   const processLike = globalThis as {
     process?: {
       env?: {
+        OPENCLAW_BASE_URL?: string;
+        OPENCLAW_HEALTH_PATH?: string;
         CLAWFLOW_OPENCLAW_ENDPOINT?: string;
         CLAWFLOW_OPENCLAW_HEALTH_TIMEOUT_MS?: string;
       };
@@ -327,6 +423,8 @@ function readOpenClawEnvironment(): OpenClawEnvironment {
   };
 
   return {
+    OPENCLAW_BASE_URL: processLike.process?.env?.OPENCLAW_BASE_URL,
+    OPENCLAW_HEALTH_PATH: processLike.process?.env?.OPENCLAW_HEALTH_PATH,
     CLAWFLOW_OPENCLAW_ENDPOINT: processLike.process?.env?.CLAWFLOW_OPENCLAW_ENDPOINT,
     CLAWFLOW_OPENCLAW_HEALTH_TIMEOUT_MS:
       processLike.process?.env?.CLAWFLOW_OPENCLAW_HEALTH_TIMEOUT_MS
@@ -360,6 +458,52 @@ function normalizePositiveInteger(value: number | undefined): number | undefined
   }
 
   return Math.floor(value);
+}
+
+function normalizeHealthPath(value: string): string {
+  const trimmedValue = value.trim();
+
+  if (trimmedValue === "") {
+    return DEFAULT_OPENCLAW_HEALTH_PATH;
+  }
+
+  return trimmedValue.startsWith("/") ? trimmedValue : `/${trimmedValue}`;
+}
+
+function createHttpHealthUrl(baseUrl: string, healthPath: string): string {
+  try {
+    const normalizedBaseUrl = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
+    const normalizedPath = healthPath.startsWith("/") ? healthPath.slice(1) : healthPath;
+    return new URL(normalizedPath, normalizedBaseUrl).toString();
+  } catch {
+    return `${baseUrl}${healthPath}`;
+  }
+}
+
+function validateHttpHealthUrl(healthUrl: string): URL {
+  let parsedUrl: URL;
+
+  try {
+    parsedUrl = new URL(healthUrl);
+  } catch (error: unknown) {
+    throw new OpenClawEndpointError(
+      "invalid",
+      `OpenClaw health URL is invalid: ${readErrorMessage(error)}`
+    );
+  }
+
+  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+    throw new OpenClawEndpointError(
+      "invalid",
+      `OpenClaw health URL must use http:// or https://: ${healthUrl}`
+    );
+  }
+
+  return parsedUrl;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function validateWebSocketEndpoint(endpoint: string): void {

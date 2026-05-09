@@ -1038,6 +1038,62 @@ button {
   white-space: nowrap;
 }
 
+.openclaw-dogfood-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(99, 199, 178, 0.26);
+  border-radius: 7px;
+  background: rgba(99, 199, 178, 0.06);
+}
+
+.openclaw-dogfood-card > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.openclaw-dogfood-card strong {
+  color: #d7f4ec;
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.openclaw-dogfood-card span,
+.openclaw-dogfood-card p {
+  margin: 0;
+  color: #c8c0b4;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.openclaw-dogfood-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.openclaw-dogfood-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 8px;
+  color: #ebe6dc;
+  border: 1px solid #3c3832;
+  border-radius: 6px;
+  background: #24231f;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.openclaw-dogfood-actions button:hover,
+.openclaw-dogfood-actions button:focus-visible {
+  border-color: #5d554a;
+  background: #2d2a25;
+}
+
 .runtime-status-badge {
   flex: 0 0 auto;
   padding: 2px 8px;
@@ -3262,7 +3318,7 @@ button {
   right: 12px;
   z-index: 8;
   display: grid;
-  grid-template-rows: 46px minmax(0, 1fr);
+  grid-template-rows: 46px auto minmax(0, 1fr);
   width: min(520px, calc(100% - 24px));
   max-height: calc(100% - 24px);
   border: 1px solid #3a3834;
@@ -3299,9 +3355,43 @@ button {
   line-height: 14px;
 }
 
+.export-panel-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 10px 0;
+  border-top: 1px solid #282724;
+  background: #1a1a18;
+}
+
+.export-panel-tabs button {
+  min-height: 28px;
+  padding: 0 9px;
+  color: #bcb5aa;
+  border: 1px solid #34322f;
+  border-radius: 6px;
+  background: #20201d;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.export-panel-tabs button:hover,
+.export-panel-tabs button:focus-visible {
+  color: #ede7dd;
+  border-color: #4c4740;
+}
+
+.export-panel-tabs button.is-active {
+  color: #10100f;
+  border-color: #d6b25e;
+  background: #d6b25e;
+}
+
 .export-panel pre {
   min-height: 0;
   margin: 0;
+  border-top: 1px solid #282724;
   overflow: auto;
   padding: 12px;
   color: #d9d3c8;
@@ -3387,6 +3477,8 @@ button {
 }
 
 .runtime-select-summary {
+  display: grid;
+  gap: 6px;
   margin-top: 8px;
   padding: 8px;
   color: #a9a197;
@@ -3399,6 +3491,10 @@ button {
 
 .field-error-text {
   color: #ef9a86;
+}
+
+.protected-runtime-note {
+  color: #d6b25e;
 }
 
 .harness-inspector-card {
