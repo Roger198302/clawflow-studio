@@ -5,6 +5,7 @@ import {
   MarkerType,
   MiniMap,
   ReactFlow,
+  type ReactFlowInstance,
   type Connection,
   type Edge,
   type EdgeChange,
@@ -45,6 +46,8 @@ import {
 } from "@clawflow/runtime-registry/harnesses";
 import {
   Braces,
+  ChevronDown,
+  ChevronUp,
   CircleStop,
   ClipboardList,
   Languages,
@@ -67,9 +70,15 @@ import {
   useRef,
   useState,
   type ChangeEvent,
-  type ReactElement
+  type MouseEvent as ReactMouseEvent,
+  type ReactElement,
+  type WheelEvent as ReactWheelEvent
 } from "react";
-import { ClawFlowNode, type ClawFlowNodeData } from "./components/ClawFlowNode";
+import {
+  ClawFlowNode,
+  type ClawFlowNodeData,
+  type EffectiveNodeDisplayMode
+} from "./components/ClawFlowNode";
 import { DismissibleAlert } from "./components/DismissibleAlert";
 import { ExecutionContractPreviewPanel } from "./components/ExecutionContractPreviewPanel";
 import { HarnessInspector } from "./components/HarnessInspector";
@@ -101,14 +110,56 @@ const DEFAULT_SOURCE_HANDLE = "out";
 const DEFAULT_TARGET_HANDLE = "in";
 const PREVIEW_REFRESH_DEBOUNCE_MS = 220;
 const WORKSPACE_VIEW_MODE_STORAGE_KEY = "clawflow.workspaceViewMode";
+const NODE_DISPLAY_MODE_STORAGE_KEY = "clawflow.nodeDisplayMode";
+const WORKSPACE_PRESET_STORAGE_KEY = "clawflow.workspacePreset";
+const WORKSPACE_PANEL_STATE_STORAGE_KEY = "clawflow.workspacePanelState";
+const CONTEXT_MENU_WIDTH = 224;
+const CONTEXT_MENU_MARGIN = 8;
+const CONTEXT_MENU_ROW_HEIGHT = 34;
+const CONTEXT_MENU_VERTICAL_PADDING = 12;
 const workspaceViewModes = ["default", "focus", "run-monitor", "debug"] as const;
 type WorkspaceViewMode = (typeof workspaceViewModes)[number];
+const nodeDisplayModes = ["auto", "compact", "standard", "detailed", "trace"] as const;
+type NodeDisplayMode = (typeof nodeDisplayModes)[number];
+const workspacePresets = ["builder", "runner", "reviewer", "presenter", "custom"] as const;
+type WorkspacePreset = (typeof workspacePresets)[number];
+type CanvasContextMenuKind = "pane" | "node" | "edge";
 
 const workspaceViewModeLabelKeys: Record<WorkspaceViewMode, I18nKey> = {
   default: "workspaceView.default",
   focus: "workspaceView.focus",
   "run-monitor": "workspaceView.runMonitor",
   debug: "workspaceView.debug"
+};
+
+const nodeDisplayModeLabelKeys: Record<NodeDisplayMode, I18nKey> = {
+  auto: "nodeDisplay.auto",
+  compact: "nodeDisplay.compact",
+  standard: "nodeDisplay.standard",
+  detailed: "nodeDisplay.detailed",
+  trace: "nodeDisplay.trace"
+};
+
+const workspacePresetLabelKeys: Record<WorkspacePreset, I18nKey> = {
+  builder: "workspacePreset.builder",
+  runner: "workspacePreset.runner",
+  reviewer: "workspacePreset.reviewer",
+  presenter: "workspacePreset.presenter",
+  custom: "workspacePreset.custom"
+};
+
+const nodeOverrideDisplayModes: EffectiveNodeDisplayMode[] = [
+  "compact",
+  "standard",
+  "detailed",
+  "trace"
+];
+
+const nodeOverrideModeLabelKeys: Record<EffectiveNodeDisplayMode, I18nKey> = {
+  compact: "nodeDisplay.compact",
+  standard: "nodeDisplay.standard",
+  detailed: "nodeDisplay.detailed",
+  trace: "nodeDisplay.trace"
 };
 
 const nodeIcons: Record<NodeType, LucideIcon> = {
@@ -135,6 +186,36 @@ const thinkingLevels: BudgetPolicy["thinking"][] = ["none", "low", "medium", "hi
 const riskLevels: RiskPolicy["level"][] = ["low", "medium", "high", "critical"];
 
 type CanvasNode = Node<ClawFlowNodeData, "clawflowNode">;
+
+interface ContextMenuPosition {
+  x: number;
+  y: number;
+}
+
+interface CanvasContextMenuState extends ContextMenuPosition {
+  kind: CanvasContextMenuKind;
+  flowPosition?: FlowNode["position"];
+  nodeId?: string;
+  edgeId?: string;
+}
+
+interface CanvasContextMenuItem {
+  id: string;
+  label: string;
+  onSelect: () => void;
+  groupId?: string;
+  groupLabel?: string;
+  isActive?: boolean;
+  tone?: "danger";
+}
+
+interface CanvasContextMenuProps {
+  menu: CanvasContextMenuState;
+  items: CanvasContextMenuItem[];
+  label: string;
+  closeLabel: string;
+  onClose: () => void;
+}
 
 interface CreateRunResponse {
   runId: string;
@@ -175,8 +256,73 @@ interface WorkspaceVisibility {
   runInspector: boolean;
 }
 
+interface WorkspacePanelState {
+  nodeLibraryCollapsed: boolean;
+  inspectorCollapsed: boolean;
+  runInspectorCollapsed: boolean;
+}
+
+interface WorkspacePresetConfig {
+  workspaceViewMode: WorkspaceViewMode;
+  nodeDisplayMode: NodeDisplayMode;
+  panelState: WorkspacePanelState;
+}
+
+const DEFAULT_WORKSPACE_PANEL_STATE: WorkspacePanelState = {
+  nodeLibraryCollapsed: false,
+  inspectorCollapsed: false,
+  runInspectorCollapsed: false
+};
+
+const PRESET_CONFIGS: Record<Exclude<WorkspacePreset, "custom">, WorkspacePresetConfig> = {
+  builder: {
+    workspaceViewMode: "default",
+    nodeDisplayMode: "standard",
+    panelState: {
+      nodeLibraryCollapsed: false,
+      inspectorCollapsed: false,
+      runInspectorCollapsed: true
+    }
+  },
+  runner: {
+    workspaceViewMode: "run-monitor",
+    nodeDisplayMode: "trace",
+    panelState: {
+      nodeLibraryCollapsed: true,
+      inspectorCollapsed: true,
+      runInspectorCollapsed: false
+    }
+  },
+  reviewer: {
+    workspaceViewMode: "debug",
+    nodeDisplayMode: "detailed",
+    panelState: {
+      nodeLibraryCollapsed: true,
+      inspectorCollapsed: false,
+      runInspectorCollapsed: false
+    }
+  },
+  presenter: {
+    workspaceViewMode: "focus",
+    nodeDisplayMode: "compact",
+    panelState: {
+      nodeLibraryCollapsed: true,
+      inspectorCollapsed: true,
+      runInspectorCollapsed: true
+    }
+  }
+};
+
 function isWorkspaceViewMode(value: string | null): value is WorkspaceViewMode {
   return workspaceViewModes.some((mode) => mode === value);
+}
+
+function isNodeDisplayMode(value: string | null): value is NodeDisplayMode {
+  return nodeDisplayModes.some((mode) => mode === value);
+}
+
+function isWorkspacePreset(value: string | null): value is WorkspacePreset {
+  return workspacePresets.some((preset) => preset === value);
 }
 
 function loadStoredWorkspaceViewMode(): WorkspaceViewMode {
@@ -185,8 +331,110 @@ function loadStoredWorkspaceViewMode(): WorkspaceViewMode {
   return isWorkspaceViewMode(storedValue) ? storedValue : "default";
 }
 
+function loadStoredNodeDisplayMode(): NodeDisplayMode {
+  const storedValue = window.localStorage.getItem(NODE_DISPLAY_MODE_STORAGE_KEY);
+
+  return isNodeDisplayMode(storedValue) ? storedValue : "auto";
+}
+
+function loadStoredWorkspacePreset(): WorkspacePreset {
+  const storedValue = window.localStorage.getItem(WORKSPACE_PRESET_STORAGE_KEY);
+
+  return isWorkspacePreset(storedValue) ? storedValue : "custom";
+}
+
+function isWorkspacePanelState(value: unknown): value is WorkspacePanelState {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const candidate = value as Partial<WorkspacePanelState>;
+
+  return (
+    typeof candidate.nodeLibraryCollapsed === "boolean" &&
+    typeof candidate.inspectorCollapsed === "boolean" &&
+    typeof candidate.runInspectorCollapsed === "boolean"
+  );
+}
+
+function loadStoredWorkspacePanelState(): WorkspacePanelState {
+  const storedValue = window.localStorage.getItem(WORKSPACE_PANEL_STATE_STORAGE_KEY);
+
+  if (storedValue === null) {
+    return DEFAULT_WORKSPACE_PANEL_STATE;
+  }
+
+  try {
+    const parsedValue = JSON.parse(storedValue);
+
+    return isWorkspacePanelState(parsedValue) ? parsedValue : DEFAULT_WORKSPACE_PANEL_STATE;
+  } catch {
+    return DEFAULT_WORKSPACE_PANEL_STATE;
+  }
+}
+
 function storeWorkspaceViewMode(mode: WorkspaceViewMode): void {
   window.localStorage.setItem(WORKSPACE_VIEW_MODE_STORAGE_KEY, mode);
+}
+
+function storeNodeDisplayMode(mode: NodeDisplayMode): void {
+  window.localStorage.setItem(NODE_DISPLAY_MODE_STORAGE_KEY, mode);
+}
+
+function storeWorkspacePreset(preset: WorkspacePreset): void {
+  window.localStorage.setItem(WORKSPACE_PRESET_STORAGE_KEY, preset);
+}
+
+function storeWorkspacePanelState(panelState: WorkspacePanelState): void {
+  window.localStorage.setItem(WORKSPACE_PANEL_STATE_STORAGE_KEY, JSON.stringify(panelState));
+}
+
+function resolveEffectiveNodeDisplayMode(
+  nodeDisplayMode: NodeDisplayMode,
+  workspaceViewMode: WorkspaceViewMode
+): EffectiveNodeDisplayMode {
+  if (nodeDisplayMode !== "auto") {
+    return nodeDisplayMode;
+  }
+
+  if (workspaceViewMode === "focus") {
+    return "compact";
+  }
+
+  if (workspaceViewMode === "run-monitor") {
+    return "trace";
+  }
+
+  if (workspaceViewMode === "debug") {
+    return "detailed";
+  }
+
+  return "standard";
+}
+
+function createNodeCompanionPresentation(status: RunStatus): ClawFlowNodeData["companion"] {
+  const petMood = (() => {
+    switch (status) {
+      case "queued":
+      case "running":
+      case "success":
+      case "failed":
+        return status;
+      case "waiting_approval":
+        return "waiting";
+      case "idle":
+        return "idle";
+      case "skipped":
+      case "cancelled":
+        return "warning";
+    }
+  })();
+
+  return {
+    petEnabled: false,
+    petMood,
+    petAnchor: "top-right"
+  };
 }
 
 function isTextEditingTarget(target: EventTarget | null): boolean {
@@ -232,7 +480,7 @@ function createWorkspaceVisibility(mode: WorkspaceViewMode): WorkspaceVisibility
         linearPlan: false,
         resourceEstimate: false,
         inspector: true,
-        runInspector: false
+        runInspector: true
       };
     case "default":
       return {
@@ -247,11 +495,118 @@ function createWorkspaceVisibility(mode: WorkspaceViewMode): WorkspaceVisibility
   }
 }
 
+function createContextMenuPosition(
+  clientX: number,
+  clientY: number,
+  itemCount: number
+): ContextMenuPosition {
+  const estimatedHeight = itemCount * CONTEXT_MENU_ROW_HEIGHT + CONTEXT_MENU_VERTICAL_PADDING;
+  const maxX = Math.max(CONTEXT_MENU_MARGIN, window.innerWidth - CONTEXT_MENU_WIDTH - CONTEXT_MENU_MARGIN);
+  const maxY = Math.max(CONTEXT_MENU_MARGIN, window.innerHeight - estimatedHeight - CONTEXT_MENU_MARGIN);
+
+  return {
+    x: Math.min(Math.max(clientX, CONTEXT_MENU_MARGIN), maxX),
+    y: Math.min(Math.max(clientY, CONTEXT_MENU_MARGIN), maxY)
+  };
+}
+
+function getContextMenuItemCount(kind: CanvasContextMenuKind): number {
+  if (kind === "pane") {
+    return 7;
+  }
+
+  if (kind === "node") {
+    return 15;
+  }
+
+  return 1;
+}
+
+function CanvasContextMenu({
+  menu,
+  items,
+  label,
+  closeLabel,
+  onClose
+}: CanvasContextMenuProps): ReactElement {
+  let previousGroupId: string | undefined;
+
+  return (
+    <>
+      <button
+        type="button"
+        className="canvas-context-menu-backdrop"
+        aria-label={closeLabel}
+        onPointerDown={onClose}
+      />
+      <div
+        className={`canvas-context-menu context-${menu.kind}`}
+        role="menu"
+        aria-label={label}
+        data-testid="canvas-context-menu"
+        style={{
+          left: menu.x,
+          top: menu.y
+        }}
+        onContextMenu={(event) => event.preventDefault()}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
+        {items.map((item) => {
+          const shouldShowGroup =
+            item.groupId !== undefined && item.groupId !== previousGroupId;
+          previousGroupId = item.groupId;
+
+          return (
+            <div className="canvas-context-menu-row" key={item.id}>
+              {shouldShowGroup ? (
+                <div
+                  className="canvas-context-menu-group-label"
+                  data-testid={`context-menu-group-${item.groupId}`}
+                >
+                  {item.groupLabel}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                className={`${item.isActive ? "is-active" : ""} ${
+                  item.tone === "danger" ? "is-danger" : ""
+                }`}
+                aria-current={item.isActive ? "true" : undefined}
+                data-active={item.isActive ? "true" : "false"}
+                data-testid={`context-menu-${item.id}`}
+                onClick={item.onSelect}
+              >
+                {item.isActive ? <span aria-hidden="true" className="context-menu-active-dot" /> : null}
+                <span>{item.label}</span>
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 export function App(): ReactElement {
   const activeSocketRef = useRef<WebSocket | null>(null);
+  const reactFlowInstanceRef = useRef<ReactFlowInstance<CanvasNode, Edge> | null>(null);
   const [workspaceViewMode, setWorkspaceViewModeState] = useState<WorkspaceViewMode>(
     loadStoredWorkspaceViewMode
   );
+  const [nodeDisplayMode, setNodeDisplayModeState] = useState<NodeDisplayMode>(
+    loadStoredNodeDisplayMode
+  );
+  const [workspacePreset, setWorkspacePresetState] = useState<WorkspacePreset>(
+    loadStoredWorkspacePreset
+  );
+  const [workspacePanelState, setWorkspacePanelState] = useState<WorkspacePanelState>(
+    loadStoredWorkspacePanelState
+  );
+  const [nodeDisplayOverrides, setNodeDisplayOverrides] = useState<
+    Partial<Record<string, EffectiveNodeDisplayMode>>
+  >({});
+  const [contextMenu, setContextMenu] = useState<CanvasContextMenuState | null>(null);
   const locale = useLocaleStore((state) => state.locale);
   const setLocale = useLocaleStore((state) => state.setLocale);
   const flow = useFlowStore((state) => state.flow);
@@ -289,6 +644,8 @@ export function App(): ReactElement {
   const livePlanStepStatuses = useFlowStore((state) => state.livePlanStepStatuses);
   const selectNode = useFlowStore((state) => state.selectNode);
   const addNode = useFlowStore((state) => state.addNode);
+  const duplicateNode = useFlowStore((state) => state.duplicateNode);
+  const removeNode = useFlowStore((state) => state.removeNode);
   const addEdge = useFlowStore((state) => state.addEdge);
   const removeEdges = useFlowStore((state) => state.removeEdges);
   const reconnectEdge = useFlowStore((state) => state.reconnectEdge);
@@ -322,6 +679,9 @@ export function App(): ReactElement {
   const healthCheckAll = useRuntimeStore((state) => state.healthCheckAll);
   const loadSession = useSessionStore((state) => state.loadSession);
   const runActiveSession = useSessionStore((state) => state.runActiveSession);
+  const isNodeLibraryCollapsed = workspacePanelState.nodeLibraryCollapsed;
+  const isInspectorCollapsed = workspacePanelState.inspectorCollapsed;
+  const isRunInspectorCollapsed = workspacePanelState.runInspectorCollapsed;
 
   useEffect(() => {
     void loadRuntimes();
@@ -355,6 +715,10 @@ export function App(): ReactElement {
     () => flow.nodes.find((node) => node.id === selectedNodeId) ?? null,
     [flow.nodes, selectedNodeId]
   );
+  const effectiveNodeDisplayMode = useMemo(
+    () => resolveEffectiveNodeDisplayMode(nodeDisplayMode, workspaceViewMode),
+    [nodeDisplayMode, workspaceViewMode]
+  );
 
   const canvasNodes = useMemo<CanvasNode[]>(
     () => {
@@ -369,6 +733,7 @@ export function App(): ReactElement {
         data: {
           label: node.label,
           nodeType: node.type,
+          displayMode: nodeDisplayOverrides[node.id] ?? effectiveNodeDisplayMode,
           role: node.role,
           roleLabel: t(locale, "nodeCard.role"),
           runtimeRef: node.runtimeRef ?? "mock-local",
@@ -383,18 +748,21 @@ export function App(): ReactElement {
             planStepsByNodeId.get(node.id),
             livePlanStepStatuses[node.id]
           ),
-          estimateSummary: createNodeEstimateSummary(locale, estimatesByNodeId.get(node.id))
+          estimateSummary: createNodeEstimateSummary(locale, estimatesByNodeId.get(node.id)),
+          companion: createNodeCompanionPresentation(nodeStatuses[node.id] ?? "idle")
         },
         selected: node.id === selectedNodeId
       }));
     },
     [
+      effectiveNodeDisplayMode,
       executionContractPreview,
       flowEstimate,
       flow.nodes,
       linearExecutionPlan,
       livePlanStepStatuses,
       locale,
+      nodeDisplayOverrides,
       nodeStatuses,
       runtimes,
       selectedNodeId
@@ -445,18 +813,125 @@ export function App(): ReactElement {
     [workspaceViewMode]
   );
 
-  const setWorkspaceViewMode = useCallback((mode: WorkspaceViewMode) => {
-    setWorkspaceViewModeState(mode);
-    storeWorkspaceViewMode(mode);
+  const setWorkspacePreset = useCallback((preset: WorkspacePreset) => {
+    setWorkspacePresetState(preset);
+    storeWorkspacePreset(preset);
   }, []);
+
+  const setWorkspaceViewMode = useCallback(
+    (mode: WorkspaceViewMode, options?: { markCustom?: boolean }) => {
+      setWorkspaceViewModeState(mode);
+      storeWorkspaceViewMode(mode);
+
+      if (options?.markCustom !== false) {
+        setWorkspacePreset("custom");
+      }
+    },
+    [setWorkspacePreset]
+  );
+
+  const setNodeDisplayMode = useCallback(
+    (mode: NodeDisplayMode, options?: { markCustom?: boolean }) => {
+      setNodeDisplayModeState(mode);
+      storeNodeDisplayMode(mode);
+
+      if (options?.markCustom !== false) {
+        setWorkspacePreset("custom");
+      }
+    },
+    [setWorkspacePreset]
+  );
+
+  const updateWorkspacePanelState = useCallback(
+    (patch: Partial<WorkspacePanelState>, options?: { markCustom?: boolean }) => {
+      setWorkspacePanelState((currentPanelState) => {
+        const nextPanelState = {
+          ...currentPanelState,
+          ...patch
+        };
+        storeWorkspacePanelState(nextPanelState);
+        return nextPanelState;
+      });
+
+      if (options?.markCustom !== false) {
+        setWorkspacePreset("custom");
+      }
+    },
+    [setWorkspacePreset]
+  );
+
+  const applyWorkspacePreset = useCallback(
+    (preset: WorkspacePreset) => {
+      setWorkspacePreset(preset);
+
+      if (preset === "custom") {
+        return;
+      }
+
+      const config = PRESET_CONFIGS[preset];
+      setWorkspaceViewModeState(config.workspaceViewMode);
+      setNodeDisplayModeState(config.nodeDisplayMode);
+      setWorkspacePanelState(config.panelState);
+      storeWorkspaceViewMode(config.workspaceViewMode);
+      storeNodeDisplayMode(config.nodeDisplayMode);
+      storeWorkspacePanelState(config.panelState);
+    },
+    [setWorkspacePreset]
+  );
+
+  const resetLayout = useCallback(() => {
+    setWorkspacePreset("custom");
+    setWorkspaceViewModeState("default");
+    setNodeDisplayModeState("auto");
+    setWorkspacePanelState(DEFAULT_WORKSPACE_PANEL_STATE);
+    setNodeDisplayOverrides({});
+    storeWorkspaceViewMode("default");
+    storeNodeDisplayMode("auto");
+    storeWorkspacePanelState(DEFAULT_WORKSPACE_PANEL_STATE);
+  }, [setWorkspacePreset]);
+
+  const hideNodeDetails = useCallback((nodeId: string) => {
+    setNodeDisplayOverrides((currentOverrides) => ({
+      ...currentOverrides,
+      [nodeId]: "compact"
+    }));
+  }, []);
+
+  const showNodeDetails = useCallback((nodeId: string) => {
+    setNodeDisplayOverrides((currentOverrides) => {
+      const nextOverrides = { ...currentOverrides };
+      delete nextOverrides[nodeId];
+      return nextOverrides;
+    });
+  }, []);
+
+  const setNodeDisplayOverride = useCallback(
+    (nodeId: string, displayMode: EffectiveNodeDisplayMode | null) => {
+      if (displayMode === null) {
+        showNodeDetails(nodeId);
+        return;
+      }
+
+      setNodeDisplayOverrides((currentOverrides) => ({
+        ...currentOverrides,
+        [nodeId]: displayMode
+      }));
+    },
+    [showNodeDetails]
+  );
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
-      if (
-        event.key === "Escape" &&
-        workspaceViewMode !== "default" &&
-        !isTextEditingTarget(event.target)
-      ) {
+      if (event.key !== "Escape" || isTextEditingTarget(event.target)) {
+        return;
+      }
+
+      if (contextMenu !== null) {
+        setContextMenu(null);
+        return;
+      }
+
+      if (workspaceViewMode !== "default") {
         setWorkspaceViewMode("default");
       }
     };
@@ -464,7 +939,7 @@ export function App(): ReactElement {
     window.addEventListener("keydown", handleKeyDown);
 
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [setWorkspaceViewMode, workspaceViewMode]);
+  }, [contextMenu, setWorkspaceViewMode, workspaceViewMode]);
 
   const handleNodesChange = useCallback<OnNodesChange<CanvasNode>>(
     (changes) => {
@@ -500,6 +975,64 @@ export function App(): ReactElement {
       reconnectEdge(edge.id, connection);
     },
     [reconnectEdge]
+  );
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
+
+  const stopPanelWheelPropagation = useCallback((event: ReactWheelEvent<HTMLElement>) => {
+    event.stopPropagation();
+  }, []);
+
+  const handlePaneContextMenu = useCallback(
+    (event: MouseEvent | ReactMouseEvent<Element>) => {
+      event.preventDefault();
+      const itemCount = getContextMenuItemCount("pane");
+      const menuPosition = createContextMenuPosition(event.clientX, event.clientY, itemCount);
+      const flowPosition =
+        reactFlowInstanceRef.current?.screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY
+        }) ?? {
+          x: event.clientX,
+          y: event.clientY
+        };
+
+      setContextMenu({
+        kind: "pane",
+        ...menuPosition,
+        flowPosition
+      });
+    },
+    []
+  );
+
+  const handleNodeContextMenu = useCallback(
+    (event: MouseEvent | ReactMouseEvent<Element>, node: CanvasNode) => {
+      event.preventDefault();
+      event.stopPropagation();
+      selectNode(node.id);
+      setContextMenu({
+        kind: "node",
+        ...createContextMenuPosition(event.clientX, event.clientY, getContextMenuItemCount("node")),
+        nodeId: node.id
+      });
+    },
+    [selectNode]
+  );
+
+  const handleEdgeContextMenu = useCallback(
+    (event: MouseEvent | ReactMouseEvent<Element>, edge: Edge) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setContextMenu({
+        kind: "edge",
+        ...createContextMenuPosition(event.clientX, event.clientY, getContextMenuItemCount("edge")),
+        edgeId: edge.id
+      });
+    },
+    []
   );
 
   const handleSaveFlow = useCallback(() => {
@@ -538,6 +1071,20 @@ export function App(): ReactElement {
       setWorkspaceViewMode(event.target.value as WorkspaceViewMode);
     },
     [setWorkspaceViewMode]
+  );
+
+  const handleNodeDisplayModeChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      setNodeDisplayMode(event.target.value as NodeDisplayMode);
+    },
+    [setNodeDisplayMode]
+  );
+
+  const handleWorkspacePresetChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      applyWorkspacePreset(event.target.value as WorkspacePreset);
+    },
+    [applyWorkspacePreset]
   );
 
   const closeActiveSocket = useCallback(() => {
@@ -859,11 +1406,222 @@ export function App(): ReactElement {
     [selectedNode, updateNode]
   );
 
+  const contextMenuItems = useMemo<CanvasContextMenuItem[]>(() => {
+    if (contextMenu === null) {
+      return [];
+    }
+
+    const closeAfter = (action: () => void): (() => void) => {
+      return () => {
+        action();
+        closeContextMenu();
+      };
+    };
+
+    if (contextMenu.kind === "pane") {
+      const addNodeAtCursor = (type: NodeType): (() => void) =>
+        closeAfter(() => addNode(type, contextMenu.flowPosition));
+      const createNodeGroup = {
+        groupId: "create-node",
+        groupLabel: t(locale, "contextMenu.groupCreateNode")
+      };
+      const canvasActionsGroup = {
+        groupId: "canvas-actions",
+        groupLabel: t(locale, "contextMenu.groupCanvasActions")
+      };
+
+      return [
+        {
+          id: "add-manual-trigger",
+          label: t(locale, "contextMenu.addManualTrigger"),
+          ...createNodeGroup,
+          onSelect: addNodeAtCursor("manual.trigger")
+        },
+        {
+          id: "add-start-agent",
+          label: t(locale, "contextMenu.addStartAgent"),
+          ...createNodeGroup,
+          onSelect: addNodeAtCursor("agent.start")
+        },
+        {
+          id: "add-worker-agent",
+          label: t(locale, "contextMenu.addWorkerAgent"),
+          ...createNodeGroup,
+          onSelect: addNodeAtCursor("agent.worker")
+        },
+        {
+          id: "add-end-agent",
+          label: t(locale, "contextMenu.addEndAgent"),
+          ...createNodeGroup,
+          onSelect: addNodeAtCursor("agent.end")
+        },
+        {
+          id: "add-console-output",
+          label: t(locale, "contextMenu.addConsoleOutput"),
+          ...createNodeGroup,
+          onSelect: addNodeAtCursor("output.console")
+        },
+        {
+          id: "fit-view",
+          label: t(locale, "contextMenu.fitView"),
+          ...canvasActionsGroup,
+          onSelect: closeAfter(() => {
+            void reactFlowInstanceRef.current?.fitView({ padding: 0.25, duration: 180 });
+          })
+        },
+        {
+          id: "clear-selection",
+          label: t(locale, "contextMenu.clearSelection"),
+          ...canvasActionsGroup,
+          onSelect: closeAfter(() => selectNode(null))
+        }
+      ];
+    }
+
+    if (contextMenu.kind === "node" && contextMenu.nodeId !== undefined) {
+      const nodeId = contextMenu.nodeId;
+      const nodeDisplayOverride = nodeDisplayOverrides[nodeId];
+      const nodeActionGroup = {
+        groupId: "node-actions",
+        groupLabel: t(locale, "contextMenu.groupNodeActions")
+      };
+      const nodeDisplayGroup = {
+        groupId: "node-display",
+        groupLabel: t(locale, "contextMenu.groupNodeDisplay")
+      };
+      const dangerGroup = {
+        groupId: "danger",
+        groupLabel: t(locale, "contextMenu.groupDanger")
+      };
+      const revealInspector = (): void => {
+        selectNode(nodeId);
+
+        if (workspaceViewMode !== "focus" && !workspaceVisibility.inspector) {
+          setWorkspaceViewMode("debug");
+        }
+      };
+      const revealContract = (): void => {
+        selectNode(nodeId);
+
+        if (workspaceViewMode !== "focus" && !workspaceVisibility.contractPreview) {
+          setWorkspaceViewMode("debug");
+        }
+      };
+
+      return [
+        {
+          id: "inspect-node",
+          label: t(locale, "contextMenu.inspectNode"),
+          ...nodeActionGroup,
+          onSelect: closeAfter(revealInspector)
+        },
+        {
+          id: "duplicate-node",
+          label: t(locale, "contextMenu.duplicateNode"),
+          ...nodeActionGroup,
+          onSelect: closeAfter(() => duplicateNode(nodeId))
+        },
+        {
+          id: "show-contract",
+          label: t(locale, "contextMenu.showContract"),
+          ...nodeActionGroup,
+          onSelect: closeAfter(revealContract)
+        },
+        {
+          id: "display-follow-global",
+          label: t(locale, "contextMenu.followGlobal"),
+          ...nodeDisplayGroup,
+          isActive: nodeDisplayOverride === undefined,
+          onSelect: closeAfter(() => setNodeDisplayOverride(nodeId, null))
+        },
+        ...nodeOverrideDisplayModes.map((displayMode) => ({
+          id: `display-${displayMode}`,
+          label: t(locale, nodeOverrideModeLabelKeys[displayMode]),
+          ...nodeDisplayGroup,
+          isActive: nodeDisplayOverride === displayMode,
+          onSelect: closeAfter(() => setNodeDisplayOverride(nodeId, displayMode))
+        })),
+        {
+          id: "hide-details",
+          label: t(locale, "contextMenu.hideDetails"),
+          ...nodeDisplayGroup,
+          onSelect: closeAfter(() => hideNodeDetails(nodeId))
+        },
+        {
+          id: "show-details",
+          label: t(locale, "contextMenu.showDetails"),
+          ...nodeDisplayGroup,
+          onSelect: closeAfter(() => showNodeDetails(nodeId))
+        },
+        {
+          id: "delete-node",
+          label: t(locale, "contextMenu.deleteNode"),
+          ...dangerGroup,
+          tone: "danger",
+          onSelect: closeAfter(() => {
+            removeNode(nodeId);
+            showNodeDetails(nodeId);
+          })
+        }
+      ];
+    }
+
+    if (contextMenu.kind === "edge" && contextMenu.edgeId !== undefined) {
+      const edgeId = contextMenu.edgeId;
+
+      return [
+        {
+          id: "delete-edge",
+          label: t(locale, "contextMenu.deleteEdge"),
+          onSelect: closeAfter(() => removeEdges([edgeId]))
+        }
+      ];
+    }
+
+    return [];
+  }, [
+    addNode,
+    closeContextMenu,
+    contextMenu,
+    duplicateNode,
+    hideNodeDetails,
+    locale,
+    removeEdges,
+    removeNode,
+    selectNode,
+    setNodeDisplayOverride,
+    setWorkspaceViewMode,
+    showNodeDetails,
+    nodeDisplayOverrides,
+    workspaceViewMode,
+    workspaceVisibility.contractPreview,
+    workspaceVisibility.inspector
+  ]);
+
+  const contextMenuLabel =
+    contextMenu === null
+      ? t(locale, "contextMenu.label")
+      : contextMenu.kind === "pane"
+        ? t(locale, "contextMenu.canvasLabel")
+        : contextMenu.kind === "node"
+          ? t(locale, "contextMenu.nodeLabel")
+          : t(locale, "contextMenu.edgeLabel");
+  const isNodeLibraryPanelVisible = workspaceVisibility.nodeLibrary && !isNodeLibraryCollapsed;
+  const isNodeLibraryRestoreVisible = workspaceVisibility.nodeLibrary && isNodeLibraryCollapsed;
+  const isInspectorPanelVisible = workspaceVisibility.inspector && !isInspectorCollapsed;
+  const isInspectorRestoreVisible = workspaceVisibility.inspector && isInspectorCollapsed;
+  const inspectorRestoreSummary = selectedNode?.label ?? t(locale, "inspector.noSelection");
+
   return (
     <div
-      className={`studio-shell workspace-mode-${workspaceViewMode}`}
+      className={`studio-shell workspace-mode-${workspaceViewMode} ${
+        isNodeLibraryCollapsed ? "node-library-collapsed" : ""
+      } ${
+        isInspectorCollapsed ? "inspector-collapsed" : ""
+      } ${isRunInspectorCollapsed ? "run-inspector-collapsed" : ""}`}
       data-testid="studio-shell"
       data-workspace-mode={workspaceViewMode}
+      data-workspace-preset={workspacePreset}
     >
       <header className="top-bar" data-testid="top-bar">
         <div className="brand-lockup" data-testid="brand-lockup">
@@ -878,6 +1636,25 @@ export function App(): ReactElement {
           {topStatusMessage}
         </div>
 
+        <div className="execution-action-strip" data-testid="execution-action-strip">
+          <div className="run-action-group" data-testid="run-button-context">
+            <button
+              type="button"
+              className="run-action"
+              data-testid="run-button"
+              title={t(locale, "top.runTitle")}
+              onClick={handleRunFlow}
+              disabled={isRunActive}
+            >
+              <Play aria-hidden="true" size={16} />
+              {isRunActive ? t(locale, "top.running") : t(locale, "top.run")}
+            </button>
+            <span data-testid="pre-run-summary">
+              {formatPreRunSummary(locale, runReadinessReport, runReadinessLoading, runReadinessError)}
+            </span>
+          </div>
+        </div>
+
         <RunReadinessPreview
           locale={locale}
           report={runReadinessReport}
@@ -886,6 +1663,25 @@ export function App(): ReactElement {
         />
 
         <nav className="top-actions" aria-label={t(locale, "top.workspaceActions")} data-testid="workspace-actions">
+          <label
+            className="workspace-preset-switcher"
+            title={t(locale, "workspacePreset.title")}
+            data-testid="workspace-preset-control"
+          >
+            <span>{t(locale, "workspacePreset.label")}</span>
+            <select
+              value={workspacePreset}
+              onChange={handleWorkspacePresetChange}
+              aria-label={t(locale, "workspacePreset.title")}
+              data-testid="workspace-preset-select"
+            >
+              {workspacePresets.map((preset) => (
+                <option key={preset} value={preset}>
+                  {t(locale, workspacePresetLabelKeys[preset])}
+                </option>
+              ))}
+            </select>
+          </label>
           <label
             className="view-mode-switcher"
             title={t(locale, "workspaceView.title")}
@@ -905,6 +1701,29 @@ export function App(): ReactElement {
               ))}
             </select>
           </label>
+          <label
+            className="node-display-switcher"
+            title={t(locale, "nodeDisplay.autoHint")}
+            data-testid="node-display-mode-control"
+          >
+            <span>{t(locale, "nodeDisplay.label")}</span>
+            <select
+              value={nodeDisplayMode}
+              onChange={handleNodeDisplayModeChange}
+              aria-label={t(locale, "nodeDisplay.title")}
+              aria-describedby="node-display-mode-hint"
+              data-testid="node-display-mode-select"
+            >
+              {nodeDisplayModes.map((mode) => (
+                <option key={mode} value={mode}>
+                  {t(locale, nodeDisplayModeLabelKeys[mode])}
+                </option>
+              ))}
+            </select>
+            <span id="node-display-mode-hint" className="sr-only" data-testid="node-display-mode-hint">
+              {t(locale, "nodeDisplay.autoHint")}
+            </span>
+          </label>
           <label className="language-switcher" title={t(locale, "top.language")}>
             <Languages aria-hidden="true" size={15} />
             <select
@@ -916,34 +1735,42 @@ export function App(): ReactElement {
               <option value="zh-CN">{t(locale, "language.zhCN")}</option>
             </select>
           </label>
-          <button type="button" title={t(locale, "top.saveFlowTitle")} onClick={handleSaveFlow}>
+          <button
+            type="button"
+            title={t(locale, "top.saveFlowTitle")}
+            data-testid="save-flow-button"
+            onClick={handleSaveFlow}
+          >
             <Save aria-hidden="true" size={16} />
             {t(locale, "top.saveFlow")}
           </button>
-          <button type="button" title={t(locale, "top.exportJsonTitle")} onClick={toggleExport}>
+          <button
+            type="button"
+            title={t(locale, "top.exportJsonTitle")}
+            data-testid="export-json-button"
+            onClick={toggleExport}
+          >
             <Braces aria-hidden="true" size={16} />
             {t(locale, "top.exportJson")}
           </button>
-          <button type="button" title={t(locale, "top.runtimesTitle")} onClick={openRuntimeManager}>
+          <button
+            type="button"
+            title={t(locale, "top.runtimesTitle")}
+            data-testid="runtime-manager-button"
+            onClick={openRuntimeManager}
+          >
             <Server aria-hidden="true" size={16} />
             {t(locale, "top.runtimes")}
           </button>
-          <div className="run-action-group" data-testid="run-button-context">
-            <button
-              type="button"
-              className="run-action"
-              data-testid="run-button"
-              title={t(locale, "top.runTitle")}
-              onClick={handleRunFlow}
-              disabled={isRunActive}
-            >
-              <Play aria-hidden="true" size={16} />
-              {isRunActive ? t(locale, "top.running") : t(locale, "top.run")}
-            </button>
-            <span data-testid="pre-run-summary">
-              {formatPreRunSummary(locale, runReadinessReport, runReadinessLoading, runReadinessError)}
-            </span>
-          </div>
+          <button
+            type="button"
+            title={t(locale, "workspacePreset.resetTitle")}
+            data-testid="reset-layout-button"
+            onClick={resetLayout}
+          >
+            <RotateCcw aria-hidden="true" size={16} />
+            {t(locale, "workspacePreset.reset")}
+          </button>
         </nav>
       </header>
 
@@ -970,42 +1797,107 @@ export function App(): ReactElement {
         />
       ) : null}
 
-      {workspaceVisibility.nodeLibrary ? (
-        <aside className="node-library" aria-label={t(locale, "nodeLibrary.aria")} data-testid="node-library">
-          <div className="pane-title">
-            <Library aria-hidden="true" size={16} />
-            <span>{t(locale, "nodeLibrary.title")}</span>
+      {isNodeLibraryPanelVisible ? (
+        <aside
+          className="node-library"
+          aria-label={t(locale, "nodeLibrary.aria")}
+          data-testid="node-library"
+          data-collapsed="false"
+        >
+          <div className="pane-title node-library-title">
+            <span className="pane-title-main">
+              <Library aria-hidden="true" size={16} />
+              {t(locale, "nodeLibrary.title")}
+            </span>
+            <span className="pane-title-summary" data-testid="node-library-summary">
+              {MVP_NODE_CATALOG.length} {t(locale, "common.nodes")}
+            </span>
+            <button
+              type="button"
+              className="pane-toggle-button"
+              data-testid="node-library-toggle"
+              title={t(locale, "nodeLibrary.collapse")}
+              aria-label={t(locale, "nodeLibrary.collapse")}
+              onClick={() =>
+                updateWorkspacePanelState({
+                  nodeLibraryCollapsed: true
+                })
+              }
+            >
+              <ChevronUp aria-hidden="true" size={16} />
+            </button>
           </div>
 
-          <div className="node-list">
-            {MVP_NODE_CATALOG.map((node) => {
-              const Icon = nodeIcons[node.type];
+          <div
+            className="node-library-body panel-scroll-body"
+            data-testid="node-library-body"
+            onWheel={stopPanelWheelPropagation}
+          >
+            <div className="node-list" data-testid="node-library-content">
+              {MVP_NODE_CATALOG.map((node) => {
+                const Icon = nodeIcons[node.type];
 
-              return (
-                <button
-                  key={node.type}
-                  className={`node-list-item role-${node.role}`}
-                  data-testid={`node-library-item-${node.type.replaceAll(".", "-")}`}
-                  type="button"
-                  title={getCatalogDescription(node.type, locale)}
-                  onClick={() => addNode(node.type)}
-                >
-                  <Icon aria-hidden="true" size={18} />
-                  <span>
-                    <strong>{getCatalogLabel(node.type, locale)}</strong>
-                    <small>
-                      {node.type} / {getRoleLabel(locale, node.role)}
-                    </small>
-                  </span>
-                  <Plus aria-hidden="true" className="node-add-icon" size={16} />
-                </button>
-              );
-            })}
+                return (
+                  <button
+                    key={node.type}
+                    className={`node-list-item role-${node.role}`}
+                    data-testid={`node-library-item-${node.type.replaceAll(".", "-")}`}
+                    type="button"
+                    title={getCatalogDescription(node.type, locale)}
+                    onClick={() => addNode(node.type)}
+                  >
+                    <Icon aria-hidden="true" size={18} />
+                    <span>
+                      <strong>{getCatalogLabel(node.type, locale)}</strong>
+                      <small>
+                        {node.type} / {getRoleLabel(locale, node.role)}
+                      </small>
+                    </span>
+                    <Plus aria-hidden="true" className="node-add-icon" size={16} />
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </aside>
       ) : null}
 
       <main className="canvas-pane" aria-label={t(locale, "canvas.aria")} data-testid="clawflow-canvas">
+        {isNodeLibraryRestoreVisible ? (
+          <button
+            type="button"
+            className="canvas-restore-tab node-library-restore-tab"
+            data-testid="node-library-collapsed"
+            title={t(locale, "nodeLibrary.restore")}
+            aria-label={t(locale, "nodeLibrary.restore")}
+            onClick={() =>
+              updateWorkspacePanelState({
+                nodeLibraryCollapsed: false
+              })
+            }
+          >
+            <Library aria-hidden="true" size={14} />
+            <span>{t(locale, "nodeLibrary.title")}</span>
+          </button>
+        ) : null}
+        {isInspectorRestoreVisible ? (
+          <button
+            type="button"
+            className="canvas-restore-tab inspector-restore-tab"
+            data-testid="inspector-collapsed"
+            title={t(locale, "inspector.restore")}
+            aria-label={t(locale, "inspector.restore")}
+            onClick={() =>
+              updateWorkspacePanelState({
+                inspectorCollapsed: false
+              })
+            }
+          >
+            <ClipboardList aria-hidden="true" size={14} />
+            <span>{t(locale, "inspector.title")}</span>
+            <small data-testid="inspector-collapsed-summary">{inspectorRestoreSummary}</small>
+          </button>
+        ) : null}
         {workspaceVisibility.sessionConsole ? (
           <SessionConsole
             locale={locale}
@@ -1051,8 +1943,14 @@ export function App(): ReactElement {
           onEdgesChange={handleEdgesChange}
           onConnect={handleConnect}
           onReconnect={handleReconnect}
+          onInit={(instance) => {
+            reactFlowInstanceRef.current = instance;
+          }}
           onNodeClick={(_, node) => selectNode(node.id)}
           onPaneClick={() => selectNode(null)}
+          onPaneContextMenu={handlePaneContextMenu}
+          onNodeContextMenu={handleNodeContextMenu}
+          onEdgeContextMenu={handleEdgeContextMenu}
           connectionMode={ConnectionMode.Loose}
           fitView
           fitViewOptions={{ padding: 0.25 }}
@@ -1068,6 +1966,15 @@ export function App(): ReactElement {
           <Controls position="bottom-left" />
           <MiniMap pannable zoomable />
         </ReactFlow>
+        {contextMenu !== null ? (
+          <CanvasContextMenu
+            menu={contextMenu}
+            items={contextMenuItems}
+            label={contextMenuLabel}
+            closeLabel={t(locale, "contextMenu.close")}
+            onClose={closeContextMenu}
+          />
+        ) : null}
 
         {isExportOpen ? (
           <aside className="export-panel" aria-label={t(locale, "export.aria")}>
@@ -1087,113 +1994,146 @@ export function App(): ReactElement {
         ) : null}
       </main>
 
-      {workspaceVisibility.inspector ? (
-        <aside className="inspector-pane" aria-label={t(locale, "inspector.aria")} data-testid="inspector-pane">
-          <div className="pane-title">
-            <ClipboardList aria-hidden="true" size={16} />
-            <span>{t(locale, "inspector.title")}</span>
+      {isInspectorPanelVisible ? (
+        <aside
+          className="inspector-pane"
+          aria-label={t(locale, "inspector.aria")}
+          data-testid="inspector-pane"
+          data-collapsed="false"
+        >
+          <div className="pane-title inspector-title">
+            <span className="pane-title-main">
+              <ClipboardList aria-hidden="true" size={16} />
+              {t(locale, "inspector.title")}
+            </span>
+            <span className="pane-title-summary" data-testid="inspector-summary">
+              {selectedNode?.label ?? t(locale, "inspector.noSelection")}
+            </span>
+            <button
+              type="button"
+              className="pane-toggle-button"
+              data-testid="inspector-toggle"
+              title={t(locale, "inspector.minimize")}
+              aria-label={t(locale, "inspector.minimize")}
+              onClick={() =>
+                updateWorkspacePanelState({
+                  inspectorCollapsed: true
+                })
+              }
+            >
+              <ChevronUp aria-hidden="true" size={16} />
+            </button>
           </div>
 
-          {selectedNode === null ? (
-            <section className="inspector-empty">
-              <strong>{t(locale, "inspector.emptyTitle")}</strong>
-              <span>{t(locale, "inspector.emptyBody")}</span>
-            </section>
-          ) : (
-            <div className="inspector-scroll">
-              <section className="inspector-card">
-                <h2>{t(locale, "inspector.node")}</h2>
-                <div className="field-stack">
-                  <label className="field-control">
-                    <span>{t(locale, "inspector.label")}</span>
-                    <input value={selectedNode.label} onChange={handleLabelChange} />
-                  </label>
-                  <div className="readonly-grid">
-                    <span>{t(locale, "inspector.type")}</span>
-                    <code title={selectedNode.type}>{selectedNode.type}</code>
-                    <span>{t(locale, "inspector.role")}</span>
-                    <code title={selectedNode.role}>{getRoleLabel(locale, selectedNode.role)}</code>
-                    <span>{t(locale, "inspector.status")}</span>
-                    <code title={nodeStatuses[selectedNode.id] ?? "idle"}>
-                      {nodeStatuses[selectedNode.id] ?? "idle"}
-                    </code>
+          <div
+            className="inspector-body panel-scroll-body"
+            data-testid="inspector-body"
+            onWheel={stopPanelWheelPropagation}
+          >
+            <div className="inspector-scroll" data-testid="inspector-content">
+              {selectedNode === null ? (
+                <section className="inspector-empty">
+                  <strong>{t(locale, "inspector.emptyTitle")}</strong>
+                  <span>{t(locale, "inspector.emptyBody")}</span>
+                </section>
+              ) : (
+                <>
+                <section className="inspector-card">
+                  <h2>{t(locale, "inspector.node")}</h2>
+                  <div className="field-stack">
+                    <label className="field-control">
+                      <span>{t(locale, "inspector.label")}</span>
+                      <input value={selectedNode.label} onChange={handleLabelChange} />
+                    </label>
+                    <div className="readonly-grid">
+                      <span>{t(locale, "inspector.type")}</span>
+                      <code title={selectedNode.type}>{selectedNode.type}</code>
+                      <span>{t(locale, "inspector.role")}</span>
+                      <code title={selectedNode.role}>{getRoleLabel(locale, selectedNode.role)}</code>
+                      <span>{t(locale, "inspector.status")}</span>
+                      <code title={nodeStatuses[selectedNode.id] ?? "idle"}>
+                        {nodeStatuses[selectedNode.id] ?? "idle"}
+                      </code>
+                    </div>
                   </div>
-                </div>
-              </section>
+                </section>
 
-              <section className="inspector-card">
-                <h2>{t(locale, "inspector.runtime")}</h2>
-                <label className="field-control">
-                  <span>{t(locale, "inspector.runtimeRef")}</span>
-                  <select
-                    value={selectedNode.runtimeRef ?? ""}
-                    onChange={handleRuntimeChange}
-                    disabled={runtimeLoadStatus === "loading" && runtimeOptions.length === 0}
-                  >
-                    {selectedNode.role === "trigger" ? (
-                      <option value="">{t(locale, "inspector.noRuntime")}</option>
-                    ) : null}
-                    {runtimeOptions.map((runtime) => (
-                      <option key={runtime.id} value={runtime.id}>
-                        {runtime.name} / {runtime.id} / {runtime.status}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="runtime-select-summary">
-                  {runtimeError !== null ? (
-                    <span className="field-error-text">{runtimeError}</span>
-                  ) : (
-                    <span>
-                      {formatRuntimeSelection(locale, selectedNode.runtimeRef, runtimes) ??
-                        t(locale, "inspector.runtimeRegistryNotLoaded")}
-                    </span>
-                  )}
-                </div>
-              </section>
-
-              <HarnessInspector
-                locale={locale}
-                node={selectedNode}
-                runtimes={runtimes}
-                onChange={handleHarnessChange}
-              />
-
-              <section className="inspector-card">
-                <h2>{t(locale, "inspector.policies")}</h2>
-                <div className="field-stack">
+                <section className="inspector-card">
+                  <h2>{t(locale, "inspector.runtime")}</h2>
                   <label className="field-control">
-                    <span>{t(locale, "inspector.thinkingLevel")}</span>
-                    <select value={selectedNode.budgetPolicy.thinking} onChange={handleThinkingChange}>
-                      {thinkingLevels.map((level) => (
-                        <option key={level} value={level}>
-                          {level}
+                    <span>{t(locale, "inspector.runtimeRef")}</span>
+                    <select
+                      value={selectedNode.runtimeRef ?? ""}
+                      onChange={handleRuntimeChange}
+                      disabled={runtimeLoadStatus === "loading" && runtimeOptions.length === 0}
+                    >
+                      {selectedNode.role === "trigger" ? (
+                        <option value="">{t(locale, "inspector.noRuntime")}</option>
+                      ) : null}
+                      {runtimeOptions.map((runtime) => (
+                        <option key={runtime.id} value={runtime.id}>
+                          {runtime.name} / {runtime.id} / {runtime.status}
                         </option>
                       ))}
                     </select>
                   </label>
-                  <label className="field-control">
-                    <span>{t(locale, "inspector.riskLevel")}</span>
-                    <select value={selectedNode.riskPolicy.level} onChange={handleRiskChange}>
-                      {riskLevels.map((level) => (
-                        <option key={level} value={level}>
-                          {level}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </div>
-              </section>
+                  <div className="runtime-select-summary">
+                    {runtimeError !== null ? (
+                      <span className="field-error-text">{runtimeError}</span>
+                    ) : (
+                      <span>
+                        {formatRuntimeSelection(locale, selectedNode.runtimeRef, runtimes) ??
+                          t(locale, "inspector.runtimeRegistryNotLoaded")}
+                      </span>
+                    )}
+                  </div>
+                </section>
+
+                <HarnessInspector
+                  locale={locale}
+                  node={selectedNode}
+                  runtimes={runtimes}
+                  onChange={handleHarnessChange}
+                />
+
+                <section className="inspector-card">
+                  <h2>{t(locale, "inspector.policies")}</h2>
+                  <div className="field-stack">
+                    <label className="field-control">
+                      <span>{t(locale, "inspector.thinkingLevel")}</span>
+                      <select value={selectedNode.budgetPolicy.thinking} onChange={handleThinkingChange}>
+                        {thinkingLevels.map((level) => (
+                          <option key={level} value={level}>
+                            {level}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="field-control">
+                      <span>{t(locale, "inspector.riskLevel")}</span>
+                      <select value={selectedNode.riskPolicy.level} onChange={handleRiskChange}>
+                        {riskLevels.map((level) => (
+                          <option key={level} value={level}>
+                            {level}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </section>
+                </>
+              )}
             </div>
-          )}
+          </div>
         </aside>
       ) : null}
 
       {workspaceVisibility.runInspector ? (
         <section
-          className="run-inspector"
+          className={`run-inspector ${isRunInspectorCollapsed ? "is-collapsed" : ""}`}
           aria-label={t(locale, "runInspector.aria")}
           data-testid="run-inspector"
+          data-collapsed={isRunInspectorCollapsed ? "true" : "false"}
         >
         <div className="pane-title run-title">
           <span>
@@ -1218,9 +2158,39 @@ export function App(): ReactElement {
             <RotateCcw aria-hidden="true" size={14} />
             {t(locale, "runInspector.clearLogs")}
           </button>
+          <button
+            type="button"
+            className="pane-toggle-button"
+            data-testid="run-inspector-toggle"
+            title={t(
+              locale,
+              isRunInspectorCollapsed ? "runInspector.restore" : "runInspector.minimize"
+            )}
+            aria-label={t(
+              locale,
+              isRunInspectorCollapsed ? "runInspector.restore" : "runInspector.minimize"
+            )}
+            onClick={() =>
+              updateWorkspacePanelState({
+                runInspectorCollapsed: !isRunInspectorCollapsed
+              })
+            }
+          >
+            {isRunInspectorCollapsed ? (
+              <ChevronDown aria-hidden="true" size={16} />
+            ) : (
+              <ChevronUp aria-hidden="true" size={16} />
+            )}
+          </button>
         </div>
 
-        <div className="run-inspector-grid">
+        <div
+          className="run-inspector-body panel-scroll-body"
+          data-testid="run-inspector-body"
+          hidden={isRunInspectorCollapsed}
+          onWheel={stopPanelWheelPropagation}
+        >
+        <div className="run-inspector-grid" data-testid="run-inspector-content">
           <section className="run-panel run-logs-panel" aria-label={t(locale, "runInspector.logsAria")}>
             <div className="run-panel-title">
               <h3>{t(locale, "runInspector.logsTitle")}</h3>
@@ -1322,6 +2292,7 @@ export function App(): ReactElement {
               </div>
             )}
           </section>
+        </div>
         </div>
         </section>
       ) : null}
@@ -1970,7 +2941,7 @@ function createRunSummary(
         )}`;
 
   return {
-    runId: runId ?? t(locale, "runInspector.noRun"),
+    runId: runId ?? t(locale, "runInspector.noActiveSession"),
     status: runStatus,
     eventCount: runEvents.length,
     succeededNodeCount,
@@ -2476,23 +3447,23 @@ function formatEstimateMs(value: number): string {
 }
 
 function getNodeTestId(node: FlowNode): string {
-  if (node.type === "manual.trigger") {
+  if (node.id === "node.manual.trigger") {
     return "node-manual-trigger";
   }
 
-  if (node.type === "agent.start") {
+  if (node.id === "node.agent.start") {
     return "node-start-agent";
   }
 
-  if (node.type === "agent.worker") {
+  if (node.id === "node.agent.worker") {
     return "node-worker-agent";
   }
 
-  if (node.type === "agent.end") {
+  if (node.id === "node.agent.end") {
     return "node-end-agent";
   }
 
-  if (node.type === "output.console") {
+  if (node.id === "node.output.console") {
     return "node-console-output";
   }
 

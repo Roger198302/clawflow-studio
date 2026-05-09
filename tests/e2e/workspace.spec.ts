@@ -13,6 +13,16 @@ test.beforeEach(async ({ page }) => {
     if (window.sessionStorage.getItem("clawflow.e2e.initialized") !== "true") {
       window.localStorage.setItem("clawflow.locale", "en");
       window.localStorage.setItem("clawflow.workspaceViewMode", "default");
+      window.localStorage.setItem("clawflow.nodeDisplayMode", "auto");
+      window.localStorage.setItem("clawflow.workspacePreset", "custom");
+      window.localStorage.setItem(
+        "clawflow.workspacePanelState",
+        JSON.stringify({
+          nodeLibraryCollapsed: false,
+          inspectorCollapsed: false,
+          runInspectorCollapsed: false
+        })
+      );
       window.sessionStorage.setItem("clawflow.e2e.initialized", "true");
     }
   });
@@ -50,6 +60,18 @@ test("app loads with default workspace nodes and no fatal console errors", async
   await expect(page.getByTestId("run-readiness-preview")).toBeVisible();
   await expect(page.getByTestId("run-readiness-status")).toContainText("Ready with warnings");
   await expect(page.getByTestId("pre-run-summary")).toContainText(/Pre-run · \d+ warn/);
+  await expect(page.getByTestId("execution-action-strip")).toBeVisible();
+  await expectRunButtonInExecutionStrip(page);
+  await expect(page.getByTestId("node-display-mode-select")).toHaveValue("auto");
+  await expect(page.getByTestId("node-display-mode-control")).toContainText("Node:");
+  await expect(page.getByTestId("workspace-preset-select")).toHaveValue("custom");
+  await expect(page.getByTestId("workspace-preset-control")).toContainText("Preset:");
+  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "standard");
+  await expect(page.getByTestId("save-flow-button")).toBeVisible();
+  await expect(page.getByTestId("export-json-button")).toBeVisible();
+  await expect(page.getByTestId("runtime-manager-button")).toBeVisible();
+  await expect(page.getByTestId("reset-layout-button")).toBeVisible();
+  await expect(page.getByTestId("node-library-content")).toBeVisible();
   await expect(page.getByTestId("session-console-panel")).toBeVisible();
   await expect(page.getByTestId("run-inspector")).toBeVisible();
   expect(consoleErrors).toEqual([]);
@@ -70,18 +92,16 @@ test("workspace header remains usable across common desktop widths", async ({ pa
     await expect(page.getByTestId("clawflow-canvas")).toBeVisible();
 
     const header = page.getByTestId("top-bar");
-    const headerBox = await getBoundingBox(header);
-    const headerItems = [
-      page.getByTestId("brand-lockup"),
-      page.getByTestId("top-status"),
-      page.getByTestId("run-readiness-preview"),
-      page.getByTestId("workspace-actions"),
-      page.getByTestId("run-button-context")
-    ];
-
     await expect(header).toBeVisible();
     await expect(page.getByTestId("run-button")).toBeVisible();
     await expect(page.getByTestId("pre-run-summary")).toBeVisible();
+    await expect(page.getByTestId("execution-action-strip")).toBeVisible();
+    await expect(page.getByTestId("workspace-preset-control")).toBeVisible();
+    await expect(page.getByTestId("node-display-mode-control")).toBeVisible();
+    await expect(page.getByTestId("save-flow-button")).toBeVisible();
+    await expect(page.getByTestId("export-json-button")).toBeVisible();
+    await expect(page.getByTestId("runtime-manager-button")).toBeVisible();
+    await expect(page.getByTestId("reset-layout-button")).toBeVisible();
     await expect(page.getByLabel("Language")).toBeVisible();
 
     const hasNoHorizontalScrollbar = await page.evaluate(
@@ -89,21 +109,41 @@ test("workspace header remains usable across common desktop widths", async ({ pa
     );
     expect(hasNoHorizontalScrollbar).toBe(true);
 
-    for (const item of headerItems) {
+    const headerItemTestIds = [
+      "brand-lockup",
+      "top-status",
+      "execution-action-strip",
+      "run-readiness-preview",
+      "workspace-preset-control",
+      "view-mode-control",
+      "node-display-mode-control",
+      "save-flow-button",
+      "export-json-button",
+      "runtime-manager-button",
+      "reset-layout-button"
+    ];
+
+    for (const testId of headerItemTestIds) {
+      const item = page.getByTestId(testId);
+      await item.evaluate((element) =>
+        element.scrollIntoView({ block: "nearest", inline: "center" })
+      );
       await expect(item).toBeVisible();
-      const box = await getBoundingBox(item);
-      expect(box.x).toBeGreaterThanOrEqual(headerBox.x - 1);
-      expect(box.x + box.width).toBeLessThanOrEqual(headerBox.x + headerBox.width + 1);
+      await expectInsideContainerViewport(item, header);
     }
 
-    const readinessBox = await getBoundingBox(page.getByTestId("run-readiness-preview"));
-    const runContextBox = await getBoundingBox(page.getByTestId("run-button-context"));
-    expect(boxesOverlap(readinessBox, runContextBox)).toBe(false);
-
+    const topBarCanScroll = await header.evaluate(
+      (element) => element.scrollWidth >= element.clientWidth
+    );
+    expect(topBarCanScroll).toBe(true);
     const summaryFits = await page
       .getByTestId("pre-run-summary")
       .evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
     expect(summaryFits).toBe(true);
+    const nodeViewFits = await page
+      .getByTestId("node-display-mode-control")
+      .evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
+    expect(nodeViewFits).toBe(true);
   }
 });
 
@@ -118,6 +158,9 @@ test("workspace view modes hide, restore, and persist layout preferences", async
   await expect(page.getByTestId("linear-execution-plan-panel")).toBeVisible();
   await expect(page.getByTestId("resource-estimate-panel")).toBeVisible();
   await expect(page.getByTestId("run-inspector")).toBeVisible();
+  await expect(page.getByTestId("execution-action-strip")).toBeVisible();
+  await expectRunButtonInExecutionStrip(page);
+  await expectTopBarControlsReachable(page);
 
   await viewModeSelect.selectOption("focus");
   await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-mode", "focus");
@@ -128,16 +171,21 @@ test("workspace view modes hide, restore, and persist layout preferences", async
   await expect(page.getByTestId("linear-execution-plan-panel")).toBeHidden();
   await expect(page.getByTestId("resource-estimate-panel")).toBeHidden();
   await expect(page.getByTestId("run-inspector")).toBeHidden();
+  await expect(page.getByTestId("execution-action-strip")).toBeVisible();
   await expect(page.getByTestId("clawflow-canvas")).toBeVisible();
+  await expectTopBarControlsReachable(page);
 
   await page.reload();
   await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-mode", "focus");
   await expect(page.getByTestId("view-mode-select")).toHaveValue("focus");
+  await expect(page.getByTestId("execution-action-strip")).toBeVisible();
+  await expectTopBarControlsReachable(page);
 
   await page.keyboard.press("Escape");
   await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-mode", "default");
   await expect(page.getByTestId("node-library")).toBeVisible();
   await expect(page.getByTestId("run-inspector")).toBeVisible();
+  await expect(page.getByTestId("execution-action-strip")).toBeVisible();
 
   await page.getByTestId("view-mode-select").selectOption("run-monitor");
   await expect(page.getByTestId("studio-shell")).toHaveAttribute(
@@ -146,17 +194,20 @@ test("workspace view modes hide, restore, and persist layout preferences", async
   );
   await expect(page.getByTestId("session-console-panel")).toBeVisible();
   await expect(page.getByTestId("run-inspector")).toBeVisible();
+  await expect(page.getByTestId("execution-action-strip")).toBeVisible();
   await expect(page.getByTestId("node-library")).toBeHidden();
   await expect(page.getByTestId("inspector-pane")).toBeHidden();
   await expect(page.getByTestId("execution-contract-preview-panel")).toBeHidden();
+  await expectTopBarControlsReachable(page);
 
   await page.getByTestId("view-mode-select").selectOption("debug");
   await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-mode", "debug");
   await expect(page.getByTestId("session-console-panel")).toBeVisible();
   await expect(page.getByTestId("execution-contract-preview-panel")).toBeVisible();
   await expect(page.getByTestId("inspector-pane")).toBeVisible();
-  await expect(page.getByTestId("run-inspector")).toBeHidden();
+  await expect(page.getByTestId("run-inspector")).toBeVisible();
   await expect(page.getByTestId("linear-execution-plan-panel")).toBeHidden();
+  await expectTopBarControlsReachable(page);
 
   await page.getByTestId("view-mode-select").selectOption("default");
   await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-mode", "default");
@@ -164,6 +215,116 @@ test("workspace view modes hide, restore, and persist layout preferences", async
   await expect(page.getByTestId("linear-execution-plan-panel")).toBeVisible();
   await expect(page.getByTestId("resource-estimate-panel")).toBeVisible();
   await expect(page.getByTestId("run-inspector")).toBeVisible();
+});
+
+test("node display modes switch, auto-map workspace modes, and persist", async ({ page }) => {
+  const nodeDisplaySelect = page.getByTestId("node-display-mode-select");
+  const viewModeSelect = page.getByTestId("view-mode-select");
+  const workerNode = page.getByTestId(NODE_IDS.worker);
+
+  await expect(nodeDisplaySelect).toHaveValue("auto");
+  await expect(page.getByTestId("node-display-mode-control")).toContainText("Node:");
+  await expect(page.getByTestId("node-display-mode-hint")).toContainText("Auto follows workspace mode");
+  await expect(nodeDisplaySelect.locator("option")).toHaveText([
+    "Auto",
+    "Compact",
+    "Standard",
+    "Detailed",
+    "Trace"
+  ]);
+  await expect(workerNode).toHaveAttribute("data-node-display-mode", "standard");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-meta`)).toBeVisible();
+  await expect(page.getByTestId(`${NODE_IDS.worker}-estimate-badge`)).toBeVisible();
+
+  await nodeDisplaySelect.selectOption("compact");
+  await expect(workerNode).toHaveAttribute("data-node-display-mode", "compact");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-compact-meta`)).toBeVisible();
+  await expect(page.getByTestId(`${NODE_IDS.worker}-meta`)).toBeHidden();
+  await expect(page.getByTestId(`${NODE_IDS.worker}-contract-badges`)).toBeHidden();
+  await expect(page.getByTestId(`${NODE_IDS.worker}-estimate-badge`)).toBeHidden();
+  await expect(page.getByTestId(`${NODE_IDS.worker}-companion-slot`)).toBeHidden();
+
+  await nodeDisplaySelect.selectOption("detailed");
+  await expect(workerNode).toHaveAttribute("data-node-display-mode", "detailed");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-meta`)).toBeVisible();
+  await expect(page.getByTestId(`${NODE_IDS.worker}-contract-badges`)).toBeVisible();
+  await expect(page.getByTestId(`${NODE_IDS.worker}-estimate-badge`).locator("span")).toHaveCount(4);
+
+  await nodeDisplaySelect.selectOption("trace");
+  await expect(workerNode).toHaveAttribute("data-node-display-mode", "trace");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-trace-status`)).toBeVisible();
+  await expect(page.getByTestId(`${NODE_IDS.worker}-meta`)).toBeHidden();
+  await expect(page.getByTestId(`${NODE_IDS.worker}-estimate-badge`)).toBeHidden();
+
+  await nodeDisplaySelect.selectOption("auto");
+  await expect(workerNode).toHaveAttribute("data-node-display-mode", "standard");
+
+  await viewModeSelect.selectOption("focus");
+  await expect(workerNode).toHaveAttribute("data-node-display-mode", "compact");
+
+  await viewModeSelect.selectOption("debug");
+  await expect(workerNode).toHaveAttribute("data-node-display-mode", "detailed");
+
+  await viewModeSelect.selectOption("run-monitor");
+  await expect(workerNode).toHaveAttribute("data-node-display-mode", "trace");
+
+  await viewModeSelect.selectOption("default");
+  await nodeDisplaySelect.selectOption("detailed");
+  await page.reload();
+  await expect(page.getByTestId("node-display-mode-select")).toHaveValue("detailed");
+  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "detailed");
+});
+
+test("workspace presets apply scenario layouts and reset restores the default shell", async ({ page }) => {
+  const presetSelect = page.getByTestId("workspace-preset-select");
+  const nodeDisplaySelect = page.getByTestId("node-display-mode-select");
+  const viewModeSelect = page.getByTestId("view-mode-select");
+
+  await expect(presetSelect).toHaveValue("custom");
+
+  await presetSelect.selectOption("builder");
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-preset", "builder");
+  await expect(viewModeSelect).toHaveValue("default");
+  await expect(nodeDisplaySelect).toHaveValue("standard");
+  await expect(page.getByTestId("node-library")).toHaveAttribute("data-collapsed", "false");
+  await expect(page.getByTestId("inspector-pane")).toHaveAttribute("data-collapsed", "false");
+  await expect(page.getByTestId("run-inspector")).toHaveAttribute("data-collapsed", "true");
+
+  await presetSelect.selectOption("runner");
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-preset", "runner");
+  await expect(viewModeSelect).toHaveValue("run-monitor");
+  await expect(nodeDisplaySelect).toHaveValue("trace");
+  await expect(page.getByTestId("session-console-panel")).toBeVisible();
+  await expect(page.getByTestId("run-inspector")).toHaveAttribute("data-collapsed", "false");
+  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "trace");
+
+  await presetSelect.selectOption("reviewer");
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-preset", "reviewer");
+  await expect(viewModeSelect).toHaveValue("debug");
+  await expect(nodeDisplaySelect).toHaveValue("detailed");
+  await expect(page.getByTestId("inspector-pane")).toHaveAttribute("data-collapsed", "false");
+  await expect(page.getByTestId("run-inspector")).toHaveAttribute("data-collapsed", "false");
+
+  await presetSelect.selectOption("presenter");
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-preset", "presenter");
+  await expect(viewModeSelect).toHaveValue("focus");
+  await expect(nodeDisplaySelect).toHaveValue("compact");
+  await expect(page.getByTestId("node-library")).toBeHidden();
+  await expect(page.getByTestId("inspector-pane")).toBeHidden();
+  await expect(page.getByTestId("run-inspector")).toBeHidden();
+
+  const resetButton = page.getByTestId("reset-layout-button");
+  await resetButton.evaluate((element) =>
+    element.scrollIntoView({ block: "nearest", inline: "center" })
+  );
+  await resetButton.click();
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-preset", "custom");
+  await expect(viewModeSelect).toHaveValue("default");
+  await expect(nodeDisplaySelect).toHaveValue("auto");
+  await expect(page.getByTestId("node-library")).toHaveAttribute("data-collapsed", "false");
+  await expect(page.getByTestId("inspector-pane")).toHaveAttribute("data-collapsed", "false");
+  await expect(page.getByTestId("run-inspector")).toHaveAttribute("data-collapsed", "false");
+  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "standard");
 });
 
 test("run readiness preview shows localized advisory issues", async ({ page }) => {
@@ -404,6 +565,98 @@ test("edge deletion and delete-plus-reconnect path works", async ({ page }) => {
   await expect(page.getByTestId(NODE_IDS.start)).toBeVisible();
 });
 
+test("empty canvas context menu opens and adds a node", async ({ page }) => {
+  await minimizeWorkspacePanels(page);
+
+  await openCanvasContextMenu(page);
+
+  await expect(page.getByTestId("canvas-context-menu")).toBeVisible();
+  await expect(page.getByTestId("context-menu-group-create-node")).toContainText("Create Node");
+  await expect(page.getByTestId("context-menu-group-canvas-actions")).toContainText("Canvas Actions");
+  await expect(page.getByTestId("context-menu-add-manual-trigger")).toBeVisible();
+  await expect(page.getByTestId("context-menu-fit-view")).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("canvas-context-menu")).toBeHidden();
+
+  await openCanvasContextMenu(page);
+  await page.getByTestId("context-menu-add-worker-agent").click();
+  await expect(page.getByTestId("node-node-agent-worker-2")).toBeVisible();
+});
+
+test("node context menu can inspect, duplicate, and delete nodes", async ({ page }) => {
+  await minimizeWorkspacePanels(page);
+
+  await page.getByTestId(NODE_IDS.worker).click({ button: "right" });
+  await expect(page.getByTestId("canvas-context-menu")).toBeVisible();
+  await expect(page.getByTestId("context-menu-group-node-actions")).toContainText("Node Actions");
+  await expect(page.getByTestId("context-menu-group-node-display")).toContainText("Node Display");
+  await expect(page.getByTestId("context-menu-group-danger")).toContainText("Danger");
+  await expect(page.getByTestId("context-menu-inspect-node")).toBeVisible();
+  await expect(page.getByTestId("context-menu-display-follow-global")).toBeVisible();
+  await expect(page.getByTestId("context-menu-display-follow-global")).toHaveAttribute("data-active", "true");
+  await expect(page.getByTestId("context-menu-display-compact")).toBeVisible();
+  await expect(page.getByTestId("context-menu-display-standard")).toBeVisible();
+  await expect(page.getByTestId("context-menu-display-detailed")).toBeVisible();
+  await expect(page.getByTestId("context-menu-display-trace")).toBeVisible();
+  await expect(page.getByTestId("context-menu-hide-details")).toBeVisible();
+  await expect(page.getByTestId("context-menu-show-details")).toBeVisible();
+  await page.getByTestId("context-menu-inspect-node").click();
+  await expect(page.getByTestId(NODE_IDS.worker)).toHaveClass(/is-selected/);
+
+  await page.getByTestId(NODE_IDS.worker).click({ button: "right" });
+  await page.getByTestId("context-menu-hide-details").click();
+  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "compact");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-meta`)).toBeHidden();
+
+  await page.getByTestId(NODE_IDS.worker).click({ button: "right" });
+  await page.getByTestId("context-menu-show-details").click();
+  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "standard");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-meta`)).toBeVisible();
+
+  await page.getByTestId(NODE_IDS.worker).click({ button: "right" });
+  await page.getByTestId("context-menu-display-detailed").click();
+  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "detailed");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-contract-badges`)).toBeVisible();
+
+  await page.getByTestId(NODE_IDS.worker).click({ button: "right" });
+  await expect(page.getByTestId("context-menu-display-detailed")).toHaveAttribute("data-active", "true");
+  await page.getByTestId("context-menu-display-follow-global").click();
+  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "standard");
+
+  await page.getByTestId(NODE_IDS.worker).click({ button: "right" });
+  await page.getByTestId("context-menu-duplicate-node").click();
+  await expect(page.getByTestId("node-node-agent-worker-2")).toBeVisible();
+
+  await page.getByTestId("node-node-agent-worker-2").click({ button: "right" });
+  await page.getByTestId("context-menu-delete-node").click();
+  await expect(page.getByTestId("node-node-agent-worker-2")).toBeHidden();
+});
+
+test("edge context menu can delete an edge", async ({ page }) => {
+  await minimizeWorkspacePanels(page);
+
+  const beforeEdges = await edgeCount(page);
+  await edgeLocator(page, "edge.manual.trigger.agent.start").click({ button: "right", force: true });
+  await expect(page.getByTestId("canvas-context-menu")).toBeVisible();
+
+  await page.getByTestId("context-menu-delete-edge").click();
+  await expect.poll(() => edgeCount(page)).toBe(beforeEdges - 1);
+});
+
+test("context menu works in focus mode", async ({ page }) => {
+  await page.getByTestId("view-mode-select").selectOption("focus");
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-mode", "focus");
+  await expect(page.getByTestId("node-library")).toBeHidden();
+
+  await openCanvasContextMenu(page);
+  await expect(page.getByTestId("canvas-context-menu")).toBeVisible();
+  await page.getByTestId("context-menu-add-console-output").click();
+
+  await expect(page.getByTestId("node-node-output-console-2")).toBeVisible();
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-mode", "focus");
+});
+
 test("branching diagnostics are shown without crashing the canvas", async ({ page }) => {
   await minimizeWorkspacePanels(page);
 
@@ -480,6 +733,147 @@ test("floating panels minimize, restore, and drag by header", async ({ page }) =
   await assertPanelDrag(page, "resource-estimate-panel", "resource-estimate-header");
 
   await expect(page.getByTestId("clawflow-canvas")).toBeVisible();
+});
+
+test("node library, inspector, and run inspector collapse and restore", async ({ page }) => {
+  await minimizeWorkspacePanels(page);
+
+  const canvas = page.getByTestId("clawflow-canvas");
+  await expect(page.getByTestId("node-library")).toBeVisible();
+  await expect(page.getByTestId("node-library-body")).toBeVisible();
+  await expect(page.getByTestId("node-library-content")).toBeVisible();
+  const expandedCanvas = await getBoundingBox(canvas);
+  await page.getByTestId("node-library-toggle").click();
+  await expect(page.getByTestId("node-library")).toBeHidden();
+  await expect(page.getByTestId("node-library-body")).toBeHidden();
+  await expect(page.getByTestId("node-library-content")).toBeHidden();
+  await expect(page.getByTestId("node-library-collapsed")).toBeVisible();
+  await expect(page.getByTestId("node-library-collapsed")).toContainText("Node Library");
+  const leftReclaimedCanvas = await getBoundingBox(canvas);
+  expect(leftReclaimedCanvas.x).toBeLessThan(expandedCanvas.x - 20);
+  expect(leftReclaimedCanvas.width).toBeGreaterThan(expandedCanvas.width + 20);
+  await openCanvasContextMenuAt(
+    page,
+    leftReclaimedCanvas.x + 24,
+    leftReclaimedCanvas.y + leftReclaimedCanvas.height * 0.5
+  );
+  await expect(page.getByTestId("canvas-context-menu")).toBeVisible();
+  await expect(page.getByTestId("context-menu-group-create-node")).toContainText("Create Node");
+  await page.keyboard.press("Escape");
+  await page.getByTestId("node-library-collapsed").click();
+  await expect(page.getByTestId("node-library")).toHaveAttribute("data-collapsed", "false");
+  await expect(page.getByTestId("node-library-body")).toBeVisible();
+  await expect(page.getByTestId("node-library-content")).toBeVisible();
+
+  await page.getByTestId(NODE_IDS.worker).click();
+  await expect(page.getByTestId("inspector-pane")).toBeVisible();
+  await expect(page.getByTestId("inspector-summary")).toContainText("Worker Agent");
+  await expect(page.getByTestId("inspector-body")).toBeVisible();
+  await expect(page.getByTestId("inspector-content")).toBeVisible();
+
+  const inspectorExpandedCanvas = await getBoundingBox(canvas);
+  await page.getByTestId("inspector-toggle").click();
+  await expect(page.getByTestId("inspector-pane")).toBeHidden();
+  await expect(page.getByTestId("inspector-body")).toBeHidden();
+  await expect(page.getByTestId("inspector-content")).toBeHidden();
+  await expect(page.getByTestId("inspector-collapsed")).toBeVisible();
+  await expect(page.getByTestId("inspector-collapsed-summary")).toContainText("Worker Agent");
+  const rightReclaimedCanvas = await getBoundingBox(canvas);
+  expect(rightReclaimedCanvas.width).toBeGreaterThan(inspectorExpandedCanvas.width + 20);
+  expect(rightReclaimedCanvas.x + rightReclaimedCanvas.width).toBeGreaterThan(
+    inspectorExpandedCanvas.x + inspectorExpandedCanvas.width + 20
+  );
+  await openCanvasContextMenuAt(
+    page,
+    inspectorExpandedCanvas.x + inspectorExpandedCanvas.width + 24,
+    rightReclaimedCanvas.y + rightReclaimedCanvas.height * 0.35
+  );
+  await expect(page.getByTestId("canvas-context-menu")).toBeVisible();
+  await expect(page.getByTestId("context-menu-fit-view")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await page.getByTestId("inspector-collapsed").click();
+  await expect(page.getByTestId("inspector-pane")).toHaveAttribute("data-collapsed", "false");
+  await expect(page.getByTestId("inspector-body")).toBeVisible();
+  await expect(page.getByTestId("inspector-content")).toBeVisible();
+
+  const restoredCanvas = await getBoundingBox(canvas);
+  await page.getByTestId("node-library-toggle").click();
+  await page.getByTestId("inspector-toggle").click();
+  await expect(page.getByTestId("node-library-collapsed")).toBeVisible();
+  await expect(page.getByTestId("inspector-collapsed")).toBeVisible();
+  const bothCollapsedCanvas = await getBoundingBox(canvas);
+  expect(bothCollapsedCanvas.width).toBeGreaterThan(restoredCanvas.width + 250);
+  await page.getByTestId("node-library-collapsed").click();
+  await page.getByTestId("inspector-collapsed").click();
+
+  await expect(page.getByTestId("run-inspector")).toBeVisible();
+  await expect(page.getByTestId("run-inspector-body")).toBeVisible();
+  await expect(page.getByTestId("run-inspector-content")).toBeVisible();
+  const expandedRunInspector = await getBoundingBox(page.getByTestId("run-inspector"));
+
+  await page.getByTestId("run-inspector-toggle").click();
+  await expect(page.getByTestId("run-inspector")).toHaveAttribute("data-collapsed", "true");
+  await expect(page.getByTestId("run-inspector-body")).toBeHidden();
+  await expect(page.getByTestId("run-inspector-content")).toBeHidden();
+  await expect(page.getByTestId("run-inspector")).toContainText("No Active Session");
+  const collapsedRunInspector = await getBoundingBox(page.getByTestId("run-inspector"));
+  expect(collapsedRunInspector.height).toBeLessThan(expandedRunInspector.height);
+
+  await page.getByTestId("run-inspector-toggle").click();
+  await expect(page.getByTestId("run-inspector")).toHaveAttribute("data-collapsed", "false");
+  await expect(page.getByTestId("run-inspector-body")).toBeVisible();
+  await expect(page.getByTestId("run-inspector-content")).toBeVisible();
+});
+
+test("panel bodies scroll independently without moving the canvas", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 460 });
+  await page.evaluate(() => {
+    window.localStorage.setItem("clawflow.workspaceViewMode", "default");
+    window.localStorage.setItem("clawflow.nodeDisplayMode", "auto");
+    window.localStorage.setItem("clawflow.workspacePreset", "custom");
+    window.localStorage.setItem(
+      "clawflow.workspacePanelState",
+      JSON.stringify({
+        nodeLibraryCollapsed: false,
+        inspectorCollapsed: false,
+        runInspectorCollapsed: false
+      })
+    );
+  });
+  await page.reload();
+  await expect(page.getByTestId("clawflow-canvas")).toBeVisible();
+  await minimizeWorkspacePanels(page);
+
+  await expectScrollablePanelBody(page, "node-library-body");
+  await page.getByTestId("node-library-toggle").click();
+  await expect(page.getByTestId("node-library-body")).toBeHidden();
+  await expect(page.getByTestId("node-library-body")).toHaveCount(0);
+  await page.getByTestId("node-library-collapsed").click();
+  await expect(page.getByTestId("node-library-body")).toBeVisible();
+
+  await page.getByTestId(NODE_IDS.worker).click();
+  await page.getByTestId("node-display-mode-select").selectOption("detailed");
+  await expectScrollablePanelBody(page, "inspector-body");
+  await page.getByTestId("inspector-toggle").click();
+  await expect(page.getByTestId("inspector-body")).toBeHidden();
+  await expect(page.getByTestId("inspector-body")).toHaveCount(0);
+  await page.getByTestId("inspector-collapsed").click();
+  await expect(page.getByTestId("inspector-body")).toBeVisible();
+
+  await page.getByTestId("run-inspector-content").evaluate((element) => {
+    const fixture = document.createElement("div");
+    fixture.dataset.testid = "run-inspector-scroll-fixture";
+    fixture.style.gridColumn = "1 / -1";
+    fixture.style.minHeight = "520px";
+    fixture.textContent = "Run inspector scroll fixture";
+    element.appendChild(fixture);
+  });
+  await expectScrollablePanelBody(page, "run-inspector-body");
+  await page.getByTestId("run-inspector-toggle").click();
+  await expect(page.getByTestId("run-inspector-body")).toBeHidden();
+  await expectNoBoundingBox(page.getByTestId("run-inspector-body"));
+  await page.getByTestId("run-inspector-toggle").click();
+  await expect(page.getByTestId("run-inspector-body")).toBeVisible();
 });
 
 test("mock run reaches success and updates live step status", async ({ page }) => {
@@ -576,8 +970,22 @@ async function minimizeWorkspacePanels(page: Page): Promise<void> {
     "linear-execution-plan-toggle",
     "resource-estimate-toggle"
   ]) {
-    await page.getByTestId(testId).click();
+    await page.getByTestId(testId).click({ force: true });
   }
+}
+
+async function openCanvasContextMenu(page: Page): Promise<void> {
+  const canvas = await getBoundingBox(page.getByTestId("clawflow-canvas"));
+
+  await openCanvasContextMenuAt(
+    page,
+    canvas.x + canvas.width * 0.5,
+    canvas.y + canvas.height * 0.86
+  );
+}
+
+async function openCanvasContextMenuAt(page: Page, x: number, y: number): Promise<void> {
+  await page.mouse.click(x, y, { button: "right" });
 }
 
 async function restoreLinearPlanPanel(page: Page): Promise<void> {
@@ -765,6 +1173,82 @@ async function assertPanelDrag(
   expect(Math.abs(afterPanel.x - beforePanel.x) + Math.abs(afterPanel.y - beforePanel.y)).toBeGreaterThan(8);
 }
 
+async function expectRunButtonInExecutionStrip(page: Page): Promise<void> {
+  await expect(page.getByTestId("run-button")).toBeVisible();
+
+  const placement = await page.getByTestId("run-button-context").evaluate((element) => ({
+    inExecutionStrip: element.closest('[data-testid="execution-action-strip"]') !== null,
+    inWorkspaceActions: element.closest('[data-testid="workspace-actions"]') !== null
+  }));
+
+  expect(placement).toEqual({
+    inExecutionStrip: true,
+    inWorkspaceActions: false
+  });
+}
+
+async function expectTopBarControlsReachable(page: Page): Promise<void> {
+  const topBar = page.getByTestId("top-bar");
+
+  for (const testId of [
+    "workspace-preset-control",
+    "view-mode-control",
+    "node-display-mode-control",
+    "save-flow-button",
+    "export-json-button",
+    "runtime-manager-button",
+    "reset-layout-button"
+  ]) {
+    const control = page.getByTestId(testId);
+    await control.evaluate((element) =>
+      element.scrollIntoView({ block: "nearest", inline: "center" })
+    );
+    await expect(control).toBeVisible();
+    await expectInsideContainerViewport(control, topBar);
+  }
+}
+
+async function expectInsideContainerViewport(
+  locator: ReturnType<Page["locator"]>,
+  container: ReturnType<Page["locator"]>
+): Promise<void> {
+  const itemBox = await getBoundingBox(locator);
+  const containerBox = await getBoundingBox(container);
+
+  expect(itemBox.x).toBeGreaterThanOrEqual(containerBox.x - 1);
+  expect(itemBox.x + itemBox.width).toBeLessThanOrEqual(containerBox.x + containerBox.width + 1);
+}
+
+async function expectScrollablePanelBody(page: Page, bodyTestId: string): Promise<void> {
+  const body = page.getByTestId(bodyTestId);
+  await expect(body).toBeVisible();
+  await body.evaluate((element) => {
+    element.scrollTop = 0;
+  });
+
+  const metrics = await body.evaluate((element) => ({
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight
+  }));
+  expect(metrics.scrollHeight).toBeGreaterThan(metrics.clientHeight);
+
+  const canvasTransformBefore = await getCanvasTransform(page);
+  await body.hover();
+  await page.mouse.wheel(0, 220);
+  await expect.poll(() => body.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await expect.poll(() => getCanvasTransform(page)).toBe(canvasTransformBefore);
+}
+
+async function getCanvasTransform(page: Page): Promise<string> {
+  return page.locator(".react-flow__viewport").first().evaluate((element) => {
+    return window.getComputedStyle(element).transform;
+  });
+}
+
+async function expectNoBoundingBox(locator: ReturnType<Page["locator"]>): Promise<void> {
+  await expect.poll(async () => (await locator.boundingBox()) === null).toBe(true);
+}
+
 async function getBoundingBox(locator: ReturnType<Page["locator"]>) {
   const box = await locator.boundingBox();
 
@@ -800,18 +1284,6 @@ function centerX(box: { x: number; width: number }): number {
 
 function centerY(box: { y: number; height: number }): number {
   return box.y + box.height / 2;
-}
-
-function boxesOverlap(
-  first: { x: number; y: number; width: number; height: number },
-  second: { x: number; y: number; width: number; height: number }
-): boolean {
-  return !(
-    first.x + first.width <= second.x ||
-    second.x + second.width <= first.x ||
-    first.y + first.height <= second.y ||
-    second.y + second.height <= first.y
-  );
 }
 
 async function createRun(request: APIRequestContext, runtimeRef: string) {

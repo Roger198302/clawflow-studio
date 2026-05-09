@@ -109,7 +109,9 @@ export interface FlowStoreState {
   runReadinessError: string | null;
   livePlanStepStatuses: Record<string, ExecutionPlanStepStatus>;
   selectNode: (nodeId: string | null) => void;
-  addNode: (type: NodeType) => void;
+  addNode: (type: NodeType, position?: FlowNode["position"]) => void;
+  duplicateNode: (nodeId: string) => void;
+  removeNode: (nodeId: string) => void;
   addEdge: (connection: EditableEdgeConnection) => void;
   removeEdges: (edgeIds: string[]) => void;
   reconnectEdge: (edgeId: string, connection: EditableEdgeConnection) => void;
@@ -516,12 +518,12 @@ export const useFlowStore = create<FlowStoreState>((set) => ({
   selectNode: (nodeId) => {
     set({ selectedNodeId: nodeId });
   },
-  addNode: (type) => {
+  addNode: (type, position) => {
     set((state) => {
       const newNode = createFlowNode(
         type,
         createNodeId(type, state.flow.nodes),
-        createAddPosition(state.flow.nodes)
+        position ?? createAddPosition(state.flow.nodes)
       );
 
       return {
@@ -533,6 +535,59 @@ export const useFlowStore = create<FlowStoreState>((set) => ({
           ...state.nodeStatuses,
           [newNode.id]: "idle"
         }
+      };
+    });
+  },
+  duplicateNode: (nodeId) => {
+    set((state) => {
+      const sourceNode = state.flow.nodes.find((node) => node.id === nodeId);
+
+      if (sourceNode === undefined) {
+        return state;
+      }
+
+      const duplicateNode: FlowNode = {
+        ...sourceNode,
+        id: createNodeId(sourceNode.type as NodeType, state.flow.nodes),
+        position: {
+          x: sourceNode.position.x + 42,
+          y: sourceNode.position.y + 42
+        }
+      };
+
+      return {
+        flow: touchFlow(state.flow, {
+          nodes: [...state.flow.nodes, duplicateNode]
+        }),
+        selectedNodeId: duplicateNode.id,
+        nodeStatuses: {
+          ...state.nodeStatuses,
+          [duplicateNode.id]: "idle"
+        }
+      };
+    });
+  },
+  removeNode: (nodeId) => {
+    set((state) => {
+      const nextNodes = state.flow.nodes.filter((node) => node.id !== nodeId);
+
+      if (nextNodes.length === state.flow.nodes.length) {
+        return state;
+      }
+
+      const nextNodeStatuses = { ...state.nodeStatuses };
+      const nextLivePlanStepStatuses = { ...state.livePlanStepStatuses };
+      delete nextNodeStatuses[nodeId];
+      delete nextLivePlanStepStatuses[nodeId];
+
+      return {
+        flow: touchFlow(state.flow, {
+          nodes: nextNodes,
+          edges: state.flow.edges.filter((edge) => edge.source !== nodeId && edge.target !== nodeId)
+        }),
+        selectedNodeId: state.selectedNodeId === nodeId ? null : state.selectedNodeId,
+        nodeStatuses: nextNodeStatuses,
+        livePlanStepStatuses: nextLivePlanStepStatuses
       };
     });
   },
