@@ -16,6 +16,29 @@ test.beforeEach(async ({ page }) => {
       window.localStorage.setItem("clawflow.nodeDisplayMode", "auto");
       window.localStorage.setItem("clawflow.workspacePreset", "custom");
       window.localStorage.setItem(
+        "clawflow.localGatewayConnection",
+        JSON.stringify({
+          baseUrl: "http://localhost:25311",
+          healthPath: "/health",
+          status: "idle"
+        })
+      );
+      window.localStorage.setItem(
+        "clawflow.gatewayProfiles",
+        JSON.stringify([
+          {
+            id: "openclaw-local",
+            name: "OpenClaw Local",
+            kind: "openclaw",
+            baseUrl: "http://localhost:25311",
+            healthPath: "/health",
+            status: "idle",
+            protected: true
+          }
+        ])
+      );
+      window.localStorage.removeItem("clawflow.agentGatewayBindings");
+      window.localStorage.setItem(
         "clawflow.workspacePanelState",
         JSON.stringify({
           nodeLibraryCollapsed: false,
@@ -70,6 +93,7 @@ test("app loads with default workspace nodes and no fatal console errors", async
   await expect(page.getByTestId("save-flow-button")).toBeVisible();
   await expect(page.getByTestId("export-json-button")).toBeVisible();
   await expect(page.getByTestId("runtime-manager-button")).toBeVisible();
+  await expect(page.getByTestId("task-launcher-button")).toBeVisible();
   await expect(page.getByTestId("demo-guide-button")).toBeVisible();
   await expect(page.getByTestId("reset-layout-button")).toBeVisible();
   await expect(page.getByTestId("node-library-content")).toBeVisible();
@@ -102,6 +126,7 @@ test("workspace header remains usable across common desktop widths", async ({ pa
     await expect(page.getByTestId("save-flow-button")).toBeVisible();
     await expect(page.getByTestId("export-json-button")).toBeVisible();
     await expect(page.getByTestId("runtime-manager-button")).toBeVisible();
+    await expect(page.getByTestId("task-launcher-button")).toBeVisible();
     await expect(page.getByTestId("demo-guide-button")).toBeVisible();
     await expect(page.getByTestId("reset-layout-button")).toBeVisible();
     await expect(page.getByLabel("Language")).toBeVisible();
@@ -122,6 +147,7 @@ test("workspace header remains usable across common desktop widths", async ({ pa
       "save-flow-button",
       "export-json-button",
       "runtime-manager-button",
+      "task-launcher-button",
       "demo-guide-button",
       "reset-layout-button"
     ];
@@ -192,11 +218,41 @@ test("demo guide explains the beta path and reset demo flow restores defaults", 
 test("runtime manager shows OpenClaw dogfood boundary and exports manual task", async ({ page }) => {
   let runRequests = 0;
   let openClawHealthStatus: "online" | "offline" = "online";
+  let openClawProbeStatus: "online" | "offline" = "online";
 
   page.on("request", (request) => {
     if (request.url().endsWith("/api/runs")) {
       runRequests += 1;
     }
+  });
+
+  await page.route("**/api/runtimes/openclaw-local/probe", async (route) => {
+    const checkedAt = new Date().toISOString();
+
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        runtimeId: "openclaw-local",
+        health: {
+          runtimeId: "openclaw-local",
+          status: openClawProbeStatus,
+          checkedAt,
+          latencyMs: 2,
+          message:
+            openClawProbeStatus === "online"
+              ? "OpenClaw local gateway is reachable. Real Agent and Tool execution remains blocked."
+              : "OpenClaw local gateway is unavailable. Real execution remains blocked."
+        },
+        connection: {
+          baseUrl: "http://localhost:25311",
+          healthPath: "/health",
+          healthUrl: "http://localhost:25311/health",
+          status: openClawProbeStatus === "online" ? "connected" : "unavailable",
+          protected: true,
+          checkedAt
+        }
+      })
+    });
   });
 
   await page.route("**/api/runtimes/health-check", async (route) => {
@@ -238,41 +294,406 @@ test("runtime manager shows OpenClaw dogfood boundary and exports manual task", 
     });
   });
 
+  await expect(page.getByTestId("gateway-quick-connect")).toBeVisible();
+  await page.getByTestId("gateway-url-input").fill("http://localhost:25311");
+  await page.getByTestId("gateway-health-path-input").fill("/health");
+  await page.getByTestId("gateway-connect-button").click();
+  await expect(page.getByTestId("gateway-quick-connect-status")).toContainText("Connected");
+  await expect(page.getByTestId("gateway-quick-connect-message")).toContainText(
+    "Local gateway reachable"
+  );
+
+  await minimizeWorkspacePanels(page);
+  await page.getByTestId(NODE_IDS.worker).click();
+  await expect(page.getByTestId("inspector-gateway-section")).toBeVisible();
+  await expect(page.getByTestId("inspector-gateway-status")).toContainText("Workspace Default Gateway");
+  await expect(page.getByTestId("inspector-gateway-status")).toContainText("Connected");
+  await page.getByTestId("inspector-runtime-select").selectOption("openclaw-local");
+  await expect(page.getByTestId("inspector-openclaw-protected-note")).toContainText("protected dry-run only");
+  await page.getByTestId("inspector-gateway-binding-mode").selectOption("profile");
+  await page.getByTestId("inspector-gateway-profile-select").selectOption("openclaw-local");
+  await expect(page.getByTestId("inspector-gateway-status")).toContainText("OpenClaw Local");
+  await expect(page.getByTestId("inspector-gateway-status")).toContainText("Connected");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-gateway-badge`)).toContainText("OpenClaw Local");
+
   await page.getByTestId("runtime-manager-button").evaluate((element) =>
     element.scrollIntoView({ block: "nearest", inline: "center" })
   );
   await page.getByTestId("runtime-manager-button").click();
 
   await expect(page.getByTestId("runtime-manager-panel")).toBeVisible();
+  await expect(page.getByTestId("gateway-profiles-panel")).toContainText("Gateway Profiles");
+  await expect(page.getByTestId("gateway-profile-openclaw-local")).toContainText("OpenClaw Local");
+  await expect(page.getByTestId("gateway-profile-openclaw-local")).toContainText("Connected");
+  await expect(page.getByTestId("gateway-profile-usage-openclaw-local")).toContainText("Worker Agent");
   await expect(page.getByTestId("runtime-card-mock-local")).toContainText("mock-local");
   await expect(page.getByTestId("runtime-card-openclaw-local")).toContainText("openclaw-local");
   await expect(page.getByTestId("runtime-card-hermes-local")).toContainText("hermes-local");
   await expect(page.getByTestId("runtime-execution-mode-openclaw-local")).toContainText("Protected");
   await expect(page.getByTestId("openclaw-boundary-copy")).toContainText("Protected");
   await expect(page.getByTestId("openclaw-boundary-copy")).toContainText("Real OpenClaw Agent and Tool execution remains blocked");
+  await expect(page.getByTestId("runtime-status-openclaw-local")).toContainText("online");
+  await expect(page.getByTestId("openclaw-gateway-summary")).toContainText("http://localhost:25311");
   await expect(page.getByTestId("openclaw-export-task-button")).toBeVisible();
   await expect(page.getByTestId("openclaw-copy-task-button")).toBeVisible();
 
-  await page.getByRole("button", { name: "Health Check" }).click();
-  await expect(page.getByTestId("runtime-status-openclaw-local")).toContainText("online");
-  await expect(page.getByTestId("openclaw-dogfood-status")).toContainText("Connected");
-  await expect(page.getByTestId("openclaw-boundary-copy")).toContainText(
-    "Local OpenClaw health endpoint is reachable"
+  await page.getByTestId("openclaw-export-task-button").click();
+  await expect(page.getByTestId("openclaw-task-preview")).toBeVisible();
+  const openClawTaskPayload = JSON.parse(await page.getByTestId("openclaw-task-preview").innerText());
+  expect(openClawTaskPayload).toEqual(
+    expect.objectContaining({
+      targetRuntimeId: "openclaw-local",
+      realExecutionBlocked: true,
+      protectedDryRun: true
+    })
+  );
+  expect(openClawTaskPayload.targetGateway).toEqual(
+    expect.objectContaining({
+      baseUrl: "http://localhost:25311",
+      healthPath: "/health",
+      status: "connected",
+      protected: true
+    })
+  );
+  expect(openClawTaskPayload.workspaceDefaultGateway).toEqual(
+    expect.objectContaining({
+      baseUrl: "http://localhost:25311",
+      healthPath: "/health",
+      status: "connected",
+      protected: true
+    })
+  );
+  expect(openClawTaskPayload.gatewayProfiles).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: "openclaw-local",
+        name: "OpenClaw Local",
+        baseUrl: "http://localhost:25311",
+        protected: true
+      })
+    ])
+  );
+  expect(openClawTaskPayload.agentGatewayBindings).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        nodeId: "node.agent.worker",
+        bindingMode: "profile",
+        profileId: "openclaw-local",
+        resolvedGateway: expect.objectContaining({
+          source: "profile",
+          baseUrl: "http://localhost:25311",
+          protected: true
+        })
+      })
+    ])
+  );
+  expect(openClawTaskPayload.flow.nodes).toEqual(
+    expect.arrayContaining([expect.objectContaining({ label: "Manual Trigger" })])
+  );
+  expect(openClawTaskPayload.linearExecutionPlan).toEqual(
+    expect.objectContaining({ status: expect.any(String) })
+  );
+  expect(openClawTaskPayload.readiness).toEqual(
+    expect.objectContaining({ status: expect.any(String) })
   );
 
   openClawHealthStatus = "offline";
-  await page.getByRole("button", { name: "Health Check" }).click();
+  openClawProbeStatus = "offline";
+  await page.getByTestId("runtime-manager-health-check-button").click();
   await expect(page.getByTestId("runtime-status-openclaw-local")).toContainText("offline");
   await expect(page.getByTestId("openclaw-dogfood-status")).toContainText("Unavailable");
+  await expect(page.getByTestId("gateway-profile-openclaw-local")).toContainText("Unavailable");
+  await page.getByTestId("runtime-manager-button").click();
+  await expect(page.getByTestId("inspector-gateway-warning")).toContainText("Gateway unavailable warning");
+
+  await page.getByTestId("gateway-connect-button").click();
+  await expect(page.getByTestId("gateway-quick-connect-status")).toContainText("Unavailable");
+  expect(runRequests).toBe(0);
+});
+
+test("gateway profile manager creates, binds, exports, and clears custom profiles safely", async ({ page }) => {
+  let runRequests = 0;
+
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/runs") {
+      runRequests += 1;
+    }
+  });
+
+  await page.route("**/api/runtimes/openclaw-local/probe", async (route) => {
+    const body = route.request().postDataJSON() as { baseUrl?: string; healthPath?: string };
+    const baseUrl = body.baseUrl ?? "http://localhost:25311";
+    const healthPath = body.healthPath ?? "/health";
+    const isCustomOfflineProfile = baseUrl.includes("25312");
+    const checkedAt = new Date().toISOString();
+
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        runtimeId: "openclaw-local",
+        health: {
+          runtimeId: "openclaw-local",
+          status: isCustomOfflineProfile ? "offline" : "online",
+          checkedAt,
+          latencyMs: 2,
+          message: isCustomOfflineProfile
+            ? "OpenClaw profile is unavailable. Real execution remains blocked."
+            : "OpenClaw local gateway is reachable. Real Agent and Tool execution remains blocked."
+        },
+        connection: {
+          baseUrl,
+          healthPath,
+          healthUrl: `${baseUrl}${healthPath}`,
+          status: isCustomOfflineProfile ? "unavailable" : "connected",
+          protected: true,
+          checkedAt
+        }
+      })
+    });
+  });
+
+  await minimizeWorkspacePanels(page);
+  await page.getByTestId("runtime-manager-button").click();
+  await expect(page.getByTestId("gateway-profile-delete-openclaw-local")).toBeDisabled();
+  await expect(page.getByTestId("gateway-profile-default-note-openclaw-local")).toContainText(
+    "Cannot delete default gateway profile"
+  );
+
+  await page.getByTestId("gateway-profile-add-button").click();
+  await expect(page.getByTestId("gateway-profile-openclaw-local-2")).toBeVisible();
+  await page.getByTestId("gateway-profile-name-openclaw-local-2").fill("OpenClaw Lab");
+  await page.getByTestId("gateway-profile-base-url-openclaw-local-2").fill("http://localhost:25312");
+  await page.getByTestId("gateway-profile-health-path-openclaw-local-2").fill("/health");
+  await expect(page.getByTestId("gateway-profile-name-openclaw-local-2")).toHaveValue("OpenClaw Lab");
+  await expect(page.getByTestId("gateway-profile-base-url-openclaw-local-2")).toHaveValue(
+    "http://localhost:25312"
+  );
+
+  await page.getByTestId("gateway-profile-check-openclaw-local-2").click();
+  await expect(page.getByTestId("gateway-profile-openclaw-local-2")).toContainText("Unavailable");
+  expect(runRequests).toBe(0);
+
+  await page.getByTitle("Close Runtime Manager").click();
+  await page.getByTestId(NODE_IDS.worker).click();
+  await page.getByTestId("inspector-runtime-select").selectOption("openclaw-local");
+  await page.getByTestId("inspector-gateway-binding-mode").selectOption("profile");
+  await page.getByTestId("inspector-gateway-profile-select").selectOption("openclaw-local-2");
+  await expect(page.getByTestId("inspector-gateway-status")).toContainText("OpenClaw Lab");
+  await expect(page.getByTestId("inspector-gateway-status")).toContainText("Unavailable");
+  await expect(page.getByTestId("inspector-gateway-warning")).toContainText("Gateway unavailable warning");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-gateway-badge`)).toContainText("OpenClaw Lab");
+
+  await page.getByTestId("runtime-manager-button").click();
+  await expect(page.getByTestId("gateway-profile-usage-openclaw-local-2")).toContainText("Worker Agent");
+  await expect(page.getByTestId("gateway-profile-usage-openclaw-local")).toContainText(
+    "No agents using this gateway"
+  );
 
   await page.getByTestId("openclaw-export-task-button").click();
   await expect(page.getByTestId("openclaw-task-preview")).toBeVisible();
-  await expect(page.getByTestId("openclaw-task-preview")).toContainText('"targetRuntimeId": "openclaw-local"');
-  await expect(page.getByTestId("openclaw-task-preview")).toContainText('"realExecutionBlocked": true');
-  await expect(page.getByTestId("openclaw-task-preview")).toContainText('"protectedDryRun": true');
-  await expect(page.getByTestId("openclaw-task-preview")).toContainText("Manual Trigger");
-  await expect(page.getByTestId("openclaw-task-preview")).toContainText("linearExecutionPlan");
-  await expect(page.getByTestId("openclaw-task-preview")).toContainText("readiness");
+  const openClawTaskPayload = JSON.parse(await page.getByTestId("openclaw-task-preview").innerText());
+  expect(openClawTaskPayload).toEqual(
+    expect.objectContaining({
+      schemaVersion: "clawflow.openclaw.manual-task.v0",
+      source: "clawflow-studio",
+      targetRuntimeId: "openclaw-local",
+      executionMode: "manual_export",
+      realExecutionBlocked: true,
+      protectedDryRun: true
+    })
+  );
+  expect(Date.parse(openClawTaskPayload.generatedAt)).not.toBeNaN();
+  expect(openClawTaskPayload.gatewayProfiles).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: "openclaw-local" }),
+      expect.objectContaining({
+        id: "openclaw-local-2",
+        name: "OpenClaw Lab",
+        baseUrl: "http://localhost:25312",
+        status: "unavailable",
+        protected: true
+      })
+    ])
+  );
+  expect(openClawTaskPayload.agentGatewayBindings).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        nodeId: "node.agent.worker",
+        label: "Worker Agent",
+        bindingMode: "profile",
+        profileId: "openclaw-local-2",
+        resolvedGateway: expect.objectContaining({
+          source: "profile",
+          profileId: "openclaw-local-2",
+          name: "OpenClaw Lab",
+          status: "unavailable",
+          protected: true
+        })
+      })
+    ])
+  );
+  expect(runRequests).toBe(0);
+
+  await page.getByTitle("Close Runtime Manager").click();
+  await page.getByTitle("Close JSON export").evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
+  await expect(page.getByTestId("openclaw-task-preview")).toHaveCount(0);
+  await page.getByTestId("reset-layout-button").click();
+  await expect(page.getByTestId("view-mode-select")).toHaveValue("default");
+  await expect(page.getByTestId("node-display-mode-select")).toHaveValue("auto");
+  await page.getByTestId("runtime-manager-button").click();
+  await expect(page.getByTestId("gateway-profile-openclaw-local-2")).toBeVisible();
+  await page.getByTitle("Close Runtime Manager").click();
+
+  page.once("dialog", (dialog) => {
+    void dialog.accept();
+  });
+  await page.getByTestId("demo-guide-button").click();
+  await page.getByTestId("reset-demo-flow-button").click();
+  await page.keyboard.press("Escape");
+  await page.getByTestId(NODE_IDS.worker).click();
+  await expect(page.getByTestId("inspector-gateway-binding-mode")).toHaveValue("workspace-default");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-gateway-badge`)).toBeHidden();
+
+  const storedState = await page.evaluate(() => ({
+    profiles: JSON.parse(window.localStorage.getItem("clawflow.gatewayProfiles") ?? "[]") as Array<{
+      id: string;
+    }>,
+    bindings: window.localStorage.getItem("clawflow.agentGatewayBindings")
+  }));
+  expect(storedState.profiles).toEqual(
+    expect.arrayContaining([expect.objectContaining({ id: "openclaw-local-2" })])
+  );
+  expect(storedState.bindings).toBeNull();
+
+  await page.getByTestId("runtime-manager-button").click();
+  await page.getByTestId("gateway-profile-delete-openclaw-local-2").click();
+  await expect(page.getByTestId("gateway-profile-openclaw-local-2")).toHaveCount(0);
+  expect(runRequests).toBe(0);
+});
+
+test("task launcher generates protected template flows and manual export metadata", async ({ page }) => {
+  let runRequests = 0;
+
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/runs") {
+      runRequests += 1;
+    }
+  });
+
+  await page.getByTestId("task-launcher-button").evaluate((element) =>
+    element.scrollIntoView({ block: "nearest", inline: "center" })
+  );
+  await page.getByTestId("task-launcher-button").click();
+  await expect(page.getByTestId("task-launcher-panel")).toBeVisible();
+  await expect(page.getByTestId("task-template-gallery")).toContainText(
+    "Excel to Word / Markdown / Summary"
+  );
+  await expect(page.getByTestId("task-template-preview")).toContainText("Manual export only");
+
+  await page.getByTestId("task-template-excel-report").click();
+  await page.getByTestId("task-excel-name-input").fill("Finance workbook brief");
+  await page.getByTestId("task-excel-path-input").fill("/Users/demo/input.xlsx");
+  await page.getByTestId("task-output-folder-input").fill("/Users/demo/out");
+  await page.getByTestId("task-safety-mode-select").selectOption("controlled-write");
+  await expect(page.getByTestId("task-gateway-default")).toContainText(
+    "Follow Workspace Default Gateway"
+  );
+
+  page.once("dialog", (dialog) => {
+    expect(dialog.message()).toContain("Template will replace");
+    void dialog.accept();
+  });
+  await page.getByTestId("task-create-flow-button").click();
+  await expect(page.getByTestId("task-launcher-panel")).toHaveCount(0);
+  await expect(page.getByTestId("node-template-excel-planner")).toBeVisible();
+  await expect(page.getByTestId("node-template-excel-reader")).toBeVisible();
+  await expect(page.getByTestId("node-template-excel-word-writer")).toBeVisible();
+  await expect(page.getByTestId("node-template-excel-markdown-writer")).toBeVisible();
+  await expect(page.getByTestId("node-template-excel-summary")).toBeVisible();
+
+  await minimizeWorkspacePanels(page);
+  await page.getByTestId("node-template-excel-reader").click();
+  await expect(page.getByTestId("inspector-gateway-section")).toBeVisible();
+  await expect(page.getByTestId("inspector-gateway-binding-mode")).toHaveValue("workspace-default");
+  await expect(page.getByTestId("inspector-gateway-status")).toContainText(
+    "Workspace Default Gateway"
+  );
+
+  await page.getByTestId("export-json-button").evaluate((element) =>
+    element.scrollIntoView({ block: "nearest", inline: "center" })
+  );
+  await page.getByTestId("export-json-button").click();
+  await page.getByTestId("export-tab-openclaw-task").click();
+  await expect(page.getByTestId("openclaw-task-preview")).toBeVisible();
+  const openClawTaskPayload = JSON.parse(await page.getByTestId("openclaw-task-preview").innerText());
+
+  expect(openClawTaskPayload).toEqual(
+    expect.objectContaining({
+      schemaVersion: "clawflow.openclaw.manual-task.v0",
+      targetRuntimeId: "openclaw-local",
+      realExecutionBlocked: true,
+      protectedDryRun: true,
+      template: expect.objectContaining({
+        templateId: "excel-report",
+        templateName: "Excel to Word / Markdown / Summary",
+        safetyMode: "controlled-write",
+        userInputs: expect.objectContaining({
+          taskName: "Finance workbook brief",
+          inputExcelPath: "/Users/demo/input.xlsx",
+          outputFolder: "/Users/demo/out"
+        }),
+        expectedOutputs: expect.arrayContaining(["report.docx", "report.md", "summary.md"])
+      })
+    })
+  );
+  expect(openClawTaskPayload.agentGatewayBindings).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        nodeId: "template.excel.reader",
+        label: "Excel Reader Agent",
+        bindingMode: "workspace-default",
+        resolvedGateway: expect.objectContaining({
+          source: "workspace-default",
+          protected: true
+        })
+      })
+    ])
+  );
+  expect(openClawTaskPayload.flow.nodes).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: "template.excel.reader",
+        data: expect.objectContaining({
+          template: expect.objectContaining({ templateId: "excel-report" }),
+          gatewayBinding: "workspace-default"
+        })
+      })
+    ])
+  );
+  expect(runRequests).toBe(0);
+
+  await page.getByTitle("Close JSON export").evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
+
+  await createTemplateFlow(page, "task-template-local-file-summary", async () => {
+    await page.getByTestId("task-local-file-path-input").fill("/Users/demo/notes");
+    await page.getByTestId("task-output-markdown-input").fill("/Users/demo/summary.md");
+  });
+  await expect(page.getByTestId("node-template-local-file-reader")).toBeVisible();
+  await expect(page.getByTestId("node-template-local-file-summary")).toBeVisible();
+
+  await createTemplateFlow(page, "task-template-multi-agent-planning", async () => {
+    await page.getByTestId("task-planning-goal-input").fill("Plan a private beta bug triage cycle");
+    await page.getByTestId("task-worker-count-input").fill("3");
+  });
+  await expect(page.getByTestId("node-template-planning-planner")).toBeVisible();
+  await expect(page.getByTestId("node-template-planning-worker-1")).toBeVisible();
+  await expect(page.getByTestId("node-template-planning-worker-3")).toBeVisible();
+  await expect(page.getByTestId("node-template-planning-reviewer")).toBeVisible();
+  await expect(page.getByTestId("node-template-planning-summary")).toBeVisible();
   expect(runRequests).toBe(0);
 });
 
@@ -1056,6 +1477,27 @@ test("runtime protection smoke paths stay unchanged", async ({ request }) => {
   );
 });
 
+test("openclaw quick connect probe rejects non-local and execution-looking targets", async ({ request }) => {
+  const remoteResponse = await request.post("http://localhost:8787/api/runtimes/openclaw-local/probe", {
+    data: {
+      baseUrl: "http://169.254.169.254",
+      healthPath: "/health"
+    }
+  });
+  expect(remoteResponse.status()).toBe(400);
+
+  const executionPathResponse = await request.post(
+    "http://localhost:8787/api/runtimes/openclaw-local/probe",
+    {
+      data: {
+        baseUrl: "http://localhost:25311",
+        healthPath: "/api/tasks/run"
+      }
+    }
+  );
+  expect(executionPathResponse.status()).toBe(400);
+});
+
 test("run readiness endpoint reports ready, warning, and blocked preflight states", async ({ request }) => {
   const readyResponse = await createRunReadinessReport(request, createReadyInternalFlow());
   expect(readyResponse.status()).toBe(200);
@@ -1115,6 +1557,27 @@ async function minimizeWorkspacePanels(page: Page): Promise<void> {
   ]) {
     await page.getByTestId(testId).click({ force: true });
   }
+}
+
+async function createTemplateFlow(
+  page: Page,
+  templateTestId: string,
+  configure: () => Promise<void>
+): Promise<void> {
+  await page.getByTestId("task-launcher-button").evaluate((element) =>
+    element.scrollIntoView({ block: "nearest", inline: "center" })
+  );
+  await page.getByTestId("task-launcher-button").click();
+  await expect(page.getByTestId("task-launcher-panel")).toBeVisible();
+  await page.getByTestId(templateTestId).click();
+  await configure();
+
+  page.once("dialog", (dialog) => {
+    expect(dialog.message()).toContain("Template will replace");
+    void dialog.accept();
+  });
+  await page.getByTestId("task-create-flow-button").click();
+  await expect(page.getByTestId("task-launcher-panel")).toHaveCount(0);
 }
 
 async function openCanvasContextMenu(page: Page): Promise<void> {
@@ -1340,6 +1803,7 @@ async function expectTopBarControlsReachable(page: Page): Promise<void> {
     "save-flow-button",
     "export-json-button",
     "runtime-manager-button",
+    "task-launcher-button",
     "demo-guide-button",
     "reset-layout-button"
   ]) {

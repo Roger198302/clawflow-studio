@@ -131,6 +131,7 @@ export interface FlowStoreState {
   requestLinearExecutionPlan: (flow: FlowSpec) => Promise<LinearExecutionPlan | null>;
   requestFlowEstimate: (flow: FlowSpec) => Promise<FlowEstimate | null>;
   requestRunReadinessReport: (flow: FlowSpec) => Promise<RunReadinessReport | null>;
+  replaceFlow: (flow: FlowSpec) => void;
   resetDemoFlow: () => void;
   clearRun: () => void;
 }
@@ -148,6 +149,38 @@ function touchFlow(flow: FlowSpec, patch: Partial<FlowSpec>): FlowSpec {
     ...flow,
     ...patch,
     updatedAt: new Date().toISOString()
+  };
+}
+
+function createFlowReplacementState(flow: FlowSpec): Partial<FlowStoreState> {
+  return {
+    flow,
+    selectedNodeId: flow.nodes[0]?.id ?? null,
+    nodeStatuses: createInitialStatuses(flow),
+    saveNotice: null,
+    currentRunId: null,
+    runEvents: [],
+    runLogs: [],
+    selectedRunEventId: null,
+    runStatus: "idle",
+    runError: null,
+    runWarning: null,
+    runAlert: null,
+    runStartedAt: null,
+    runCompletedAt: null,
+    executionContractPreview: null,
+    executionContractPreviewLoading: false,
+    executionContractPreviewError: null,
+    linearExecutionPlan: null,
+    linearExecutionPlanLoading: false,
+    linearExecutionPlanError: null,
+    flowEstimate: null,
+    flowEstimateLoading: false,
+    flowEstimateError: null,
+    runReadinessReport: null,
+    runReadinessLoading: false,
+    runReadinessError: null,
+    livePlanStepStatuses: {}
   };
 }
 
@@ -700,6 +733,9 @@ export const useFlowStore = create<FlowStoreState>((set) => ({
       })
     }));
   },
+  replaceFlow: (flow) => {
+    set(createFlowReplacementState(touchFlow(flow, {})));
+  },
   markFlowSaved: () => {
     set({
       saveNotice: `Saved at ${new Date().toLocaleTimeString()}`
@@ -1034,35 +1070,7 @@ export const useFlowStore = create<FlowStoreState>((set) => ({
   resetDemoFlow: () => {
     const nextFlow = createDefaultFlow();
 
-    set({
-      flow: nextFlow,
-      selectedNodeId: nextFlow.nodes[0]?.id ?? null,
-      nodeStatuses: createInitialStatuses(nextFlow),
-      saveNotice: null,
-      currentRunId: null,
-      runEvents: [],
-      runLogs: [],
-      selectedRunEventId: null,
-      runStatus: "idle",
-      runError: null,
-      runWarning: null,
-      runAlert: null,
-      runStartedAt: null,
-      runCompletedAt: null,
-      executionContractPreview: null,
-      executionContractPreviewLoading: false,
-      executionContractPreviewError: null,
-      linearExecutionPlan: null,
-      linearExecutionPlanLoading: false,
-      linearExecutionPlanError: null,
-      flowEstimate: null,
-      flowEstimateLoading: false,
-      flowEstimateError: null,
-      runReadinessReport: null,
-      runReadinessLoading: false,
-      runReadinessError: null,
-      livePlanStepStatuses: {}
-    });
+    set(createFlowReplacementState(nextFlow));
   },
   clearRun: () => {
     set((state) => ({

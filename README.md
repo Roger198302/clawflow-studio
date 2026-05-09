@@ -32,7 +32,7 @@ Safety boundary:
 - `hermes-local` and unavailable runtimes remain rejected.
 - Local dev services bind to loopback by default.
 - No external agent/tool execution, shell, browser, file, model provider, billing, or pricing API is invoked.
-- Phase 6I local dogfood can probe a local OpenClaw health endpoint through `OPENCLAW_BASE_URL` and `OPENCLAW_HEALTH_PATH`; `openclaw-local` still does not execute agents or tools from ClawFlow Studio.
+- Phase 6I local dogfood can probe a loopback-only OpenClaw health endpoint through the WebUI Gateway card or `OPENCLAW_BASE_URL` / `OPENCLAW_HEALTH_PATH`; `openclaw-local` still does not execute agents or tools from ClawFlow Studio.
 
 ## Private Beta / MVP Boundary
 
@@ -47,6 +47,7 @@ Beta testers should use the private beta materials:
 - [Private Beta Feedback Template](docs/demo/private-beta-feedback-template.md)
 - [Clean Clone Checklist](docs/demo/clean-clone-checklist.md)
 - [Private Beta Invite Message](docs/demo/private-beta-invite-message.md)
+- [Task Launcher And Template Gallery](docs/task-templates.md)
 
 Do not use this beta for production work, secrets, credentials, sensitive files, or real external agent/tool execution.
 

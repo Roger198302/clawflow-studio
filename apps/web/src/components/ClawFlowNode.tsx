@@ -22,6 +22,7 @@ export interface ClawFlowNodeData extends Record<string, unknown> {
   contractSummary?: NodeExecutionContractBadgeSummary;
   planSummary?: NodeLinearPlanBadgeSummary;
   estimateSummary?: NodeResourceEstimateBadgeSummary;
+  gatewaySummary?: NodeGatewayBadgeSummary;
   companion?: NodeCompanionPresentation;
 }
 
@@ -69,6 +70,12 @@ export interface NodeResourceEstimateBadgeSummary {
   costLabel: string;
   latencyLabel: string;
   confidenceLabel: string;
+  hasWarning: boolean;
+}
+
+export interface NodeGatewayBadgeSummary {
+  label: string;
+  status: string;
   hasWarning: boolean;
 }
 
@@ -143,6 +150,16 @@ export function ClawFlowNode({ data, selected }: NodeProps<ClawFlowCanvasNode>):
       ) : null}
 
       {isStandardMode || isDetailedMode ? <NodeHarnessBadges summary={data.harnessSummary} /> : null}
+
+      {data.gatewaySummary !== undefined ? (
+        <div
+          className={`node-gateway-badge ${data.gatewaySummary.hasWarning ? "has-warning" : ""}`}
+          data-testid={`${data.testId}-gateway-badge`}
+        >
+          <span>{data.gatewaySummary.label}</span>
+          <strong>{data.gatewaySummary.status}</strong>
+        </div>
+      ) : null}
 
       {(isStandardMode || isDetailedMode) && data.contractSummary !== undefined ? (
         <div

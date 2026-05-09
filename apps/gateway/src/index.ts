@@ -54,6 +54,19 @@ const DEFAULT_HOST = "127.0.0.1";
 const VERSION = "0.1.0";
 const PROTOCOL_VERSION = "0.1";
 const SOCKET_OPEN = 1;
+const DEFAULT_OPENCLAW_QUICK_CONNECT_BASE_URL = "http://localhost:25311";
+const DEFAULT_OPENCLAW_QUICK_CONNECT_HEALTH_PATH = "/health";
+const DEFAULT_OPENCLAW_QUICK_CONNECT_TIMEOUT_MS = 1_500;
+const MAX_OPENCLAW_QUICK_CONNECT_TIMEOUT_MS = 5_000;
+const OPENCLAW_QUICK_CONNECT_HEALTH_PATHS = new Set([
+  "/health",
+  "/api/health",
+  "/ready",
+  "/readiness",
+  "/live",
+  "/liveness",
+  "/status"
+]);
 const LOCAL_CORS_ORIGINS = new Set([
   "http://localhost:5173",
   "http://127.0.0.1:5173",
@@ -93,6 +106,25 @@ export interface ErrorResponse {
   error: {
     code: string;
     message: string;
+  };
+}
+
+interface OpenClawLocalProbeRequest {
+  baseUrl: string;
+  healthPath: string;
+  timeoutMs: number;
+}
+
+interface OpenClawLocalProbeResponse {
+  runtimeId: "openclaw-local";
+  health: RuntimeHealth;
+  connection: {
+    baseUrl: string;
+    healthPath: string;
+    healthUrl: string;
+    status: "connected" | "unavailable";
+    protected: true;
+    checkedAt: string;
   };
 }
 
@@ -567,6 +599,24 @@ export async function createServer(): Promise<FastifyInstance> {
   server.post<{ Reply: RuntimeHealth[] | ErrorResponse }>(
     "/api/runtimes/health-check",
     async (): Promise<RuntimeHealth[]> => runtimeRegistry.healthCheckAll()
+  );
+
+  server.post<{ Body: unknown; Reply: OpenClawLocalProbeResponse | ErrorResponse }>(
+    "/api/runtimes/openclaw-local/probe",
+    async (request, reply) => {
+      const probeRequest = parseOpenClawLocalProbeRequest(request.body);
+
+      if (probeRequest === undefined) {
+        return sendError(
+          reply,
+          400,
+          "invalid_openclaw_probe",
+          "Request body must include a loopback http(s) baseUrl and a supported healthPath."
+        );
+      }
+
+      return probeOpenClawLocalGateway(probeRequest);
+    }
   );
 
   server.post<{ Body: unknown; Reply: FlowExecutionContractPreview | ErrorResponse }>(
@@ -1942,6 +1992,218 @@ function parseRunFlowRequest(value: unknown): ParsedRunRequest | undefined {
     flow: candidate.flow,
     sessionId: typeof candidate.sessionId === "string" ? candidate.sessionId : undefined
   };
+}
+
+function parseOpenClawLocalProbeRequest(value: unknown): OpenClawLocalProbeRequest | undefined {
+  if (value !== undefined && (typeof value !== "object" || value === null || Array.isArray(value))) {
+    return undefined;
+  }
+
+  const candidate = (value ?? {}) as {
+    baseUrl?: unknown;
+    healthPath?: unknown;
+    timeoutMs?: unknown;
+  };
+  const baseUrl =
+    typeof candidate.baseUrl === "string" && candidate.baseUrl.trim() !== ""
+      ? candidate.baseUrl.trim()
+      : DEFAULT_OPENCLAW_QUICK_CONNECT_BASE_URL;
+  const healthPath = normalizeOpenClawProbeHealthPath(
+    typeof candidate.healthPath === "string" && candidate.healthPath.trim() !== ""
+      ? candidate.healthPath
+      : DEFAULT_OPENCLAW_QUICK_CONNECT_HEALTH_PATH
+  );
+  const timeoutMs = normalizeOpenClawProbeTimeout(candidate.timeoutMs);
+
+  if (healthPath === undefined || timeoutMs === undefined) {
+    return undefined;
+  }
+
+  let parsedBaseUrl: URL;
+
+  try {
+    parsedBaseUrl = new URL(baseUrl);
+  } catch {
+    return undefined;
+  }
+
+  if (!isSafeOpenClawProbeBaseUrl(parsedBaseUrl)) {
+    return undefined;
+  }
+
+  const normalizedBaseUrl = `${parsedBaseUrl.protocol}//${parsedBaseUrl.host}`;
+  const healthUrl = new URL(healthPath, `${normalizedBaseUrl}/`);
+
+  if (healthUrl.search !== "" || healthUrl.hash !== "" || !isAllowedOpenClawProbePath(healthUrl.pathname)) {
+    return undefined;
+  }
+
+  return {
+    baseUrl: normalizedBaseUrl,
+    healthPath: healthUrl.pathname,
+    timeoutMs
+  };
+}
+
+function normalizeOpenClawProbeHealthPath(value: string): string | undefined {
+  const trimmedValue = value.trim();
+
+  if (trimmedValue === "" || /^https?:\/\//i.test(trimmedValue)) {
+    return undefined;
+  }
+
+  const normalizedPath = trimmedValue.startsWith("/") ? trimmedValue : `/${trimmedValue}`;
+  const lowerPath = normalizedPath.toLowerCase();
+
+  if (
+    normalizedPath.includes("\\") ||
+    normalizedPath.includes("?") ||
+    normalizedPath.includes("#") ||
+    lowerPath.includes("..") ||
+    lowerPath.includes("%2e") ||
+    lowerPath.includes("%2f") ||
+    lowerPath.includes("%5c")
+  ) {
+    return undefined;
+  }
+
+  return normalizedPath;
+}
+
+function normalizeOpenClawProbeTimeout(value: unknown): number | undefined {
+  if (value === undefined) {
+    return DEFAULT_OPENCLAW_QUICK_CONNECT_TIMEOUT_MS;
+  }
+
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return undefined;
+  }
+
+  const timeoutMs = Math.floor(value);
+
+  if (timeoutMs < 100 || timeoutMs > MAX_OPENCLAW_QUICK_CONNECT_TIMEOUT_MS) {
+    return undefined;
+  }
+
+  return timeoutMs;
+}
+
+function isSafeOpenClawProbeBaseUrl(url: URL): boolean {
+  return (
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    url.username === "" &&
+    url.password === "" &&
+    url.pathname === "/" &&
+    url.search === "" &&
+    url.hash === "" &&
+    isLoopbackHostname(url.hostname)
+  );
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalizedHostname = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+
+  return (
+    normalizedHostname === "localhost" ||
+    normalizedHostname === "::1" ||
+    normalizedHostname === "0:0:0:0:0:0:0:1" ||
+    isIpv4LoopbackAddress(normalizedHostname) ||
+    (normalizedHostname.startsWith("::ffff:") &&
+      isIpv4LoopbackAddress(normalizedHostname.slice("::ffff:".length)))
+  );
+}
+
+function isIpv4LoopbackAddress(hostname: string): boolean {
+  const octets = hostname.split(".");
+
+  if (octets.length !== 4 || octets[0] !== "127") {
+    return false;
+  }
+
+  return octets.every((octet) => {
+    if (!/^\d{1,3}$/.test(octet)) {
+      return false;
+    }
+
+    const value = Number.parseInt(octet, 10);
+    return value >= 0 && value <= 255;
+  });
+}
+
+function isAllowedOpenClawProbePath(pathname: string): boolean {
+  return OPENCLAW_QUICK_CONNECT_HEALTH_PATHS.has(pathname);
+}
+
+async function probeOpenClawLocalGateway(
+  request: OpenClawLocalProbeRequest
+): Promise<OpenClawLocalProbeResponse> {
+  const startedAt = Date.now();
+  const healthUrl = new URL(request.healthPath, `${request.baseUrl}/`);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, request.timeoutMs);
+
+  try {
+    const response = await fetch(healthUrl, {
+      method: "GET",
+      redirect: "manual",
+      signal: controller.signal
+    });
+    const checkedAt = new Date().toISOString();
+    const latencyMs = Date.now() - startedAt;
+    const isOnline = response.ok;
+    const health: RuntimeHealth = {
+      runtimeId: "openclaw-local",
+      status: isOnline ? "online" : "offline",
+      checkedAt,
+      latencyMs,
+      message: isOnline
+        ? "OpenClaw local gateway is reachable. Real Agent and Tool execution remains blocked."
+        : `OpenClaw local gateway returned HTTP ${response.status}. Real execution remains blocked.`
+    };
+
+    return createOpenClawLocalProbeResponse(request, health, healthUrl.toString());
+  } catch (error: unknown) {
+    const checkedAt = new Date().toISOString();
+    const latencyMs = Date.now() - startedAt;
+    const health: RuntimeHealth = {
+      runtimeId: "openclaw-local",
+      status: "offline",
+      checkedAt,
+      latencyMs,
+      message: isAbortError(error)
+        ? `OpenClaw local gateway probe timed out after ${request.timeoutMs}ms. Real execution remains blocked.`
+        : "OpenClaw local gateway is unavailable. Real execution remains blocked."
+    };
+
+    return createOpenClawLocalProbeResponse(request, health, healthUrl.toString());
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function createOpenClawLocalProbeResponse(
+  request: OpenClawLocalProbeRequest,
+  health: RuntimeHealth,
+  healthUrl: string
+): OpenClawLocalProbeResponse {
+  return {
+    runtimeId: "openclaw-local",
+    health,
+    connection: {
+      baseUrl: request.baseUrl,
+      healthPath: request.healthPath,
+      healthUrl,
+      status: health.status === "online" ? "connected" : "unavailable",
+      protected: true,
+      checkedAt: health.checkedAt
+    }
+  };
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function isCreateSessionRequest(value: unknown): value is CreateSessionRequest {

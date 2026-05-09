@@ -71,6 +71,7 @@ import {
   useRef,
   useState,
   type ChangeEvent,
+  type FormEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
   type WheelEvent as ReactWheelEvent
@@ -88,7 +89,9 @@ import { LinearExecutionPlanPanel } from "./components/LinearExecutionPlanPanel"
 import { ResourceEstimatePanel } from "./components/ResourceEstimatePanel";
 import { RuntimeManagerPanel } from "./components/RuntimeManagerPanel";
 import { SessionConsole } from "./components/SessionConsole";
+import { TaskLauncherPanel } from "./components/TaskLauncherPanel";
 import { getCatalogDescription, getCatalogLabel, MVP_NODE_CATALOG } from "./flowCatalog";
+import { createFlowFromTaskTemplate, type TaskTemplateInput } from "./flowTemplates";
 import {
   formatHarnessExecutionMode,
   formatHarnessFit,
@@ -99,7 +102,13 @@ import { t, type I18nKey, type Locale } from "./i18n";
 import { buildOpenClawTaskExport } from "./openClawTaskExport";
 import { useFlowStore, type RunProblemInput } from "./store/flowStore";
 import { useLocaleStore } from "./store/localeStore";
-import { useRuntimeStore } from "./store/runtimeStore";
+import {
+  useRuntimeStore,
+  type AgentGatewayBinding,
+  type GatewayProfile,
+  type LocalGatewayConnection,
+  type LocalGatewayConnectionStatus
+} from "./store/runtimeStore";
 import { useSessionStore } from "./store/sessionStore";
 
 const GATEWAY_HTTP_URL = import.meta.env.VITE_GATEWAY_HTTP_URL ?? "http://localhost:8787";
@@ -328,6 +337,54 @@ function isNodeDisplayMode(value: string | null): value is NodeDisplayMode {
 
 function isWorkspacePreset(value: string | null): value is WorkspacePreset {
   return workspacePresets.some((preset) => preset === value);
+}
+
+function getLocalGatewayConnectionStatusKey(status: LocalGatewayConnectionStatus): I18nKey {
+  if (status === "checking") {
+    return "gatewayQuickConnect.checking";
+  }
+
+  if (status === "connected") {
+    return "gatewayQuickConnect.connected";
+  }
+
+  if (status === "unavailable") {
+    return "gatewayQuickConnect.unavailable";
+  }
+
+  if (status === "protected") {
+    return "gatewayQuickConnect.protected";
+  }
+
+  return "gatewayQuickConnect.idle";
+}
+
+function formatLocalGatewayConnectionMessage(
+  locale: Locale,
+  connection: LocalGatewayConnection
+): string {
+  if (connection.status === "checking") {
+    return t(locale, "gatewayQuickConnect.checking");
+  }
+
+  if (connection.status === "connected") {
+    return `${t(locale, "gatewayQuickConnect.reachable")} ${t(
+      locale,
+      "gatewayQuickConnect.protectedCopy"
+    )}`;
+  }
+
+  if (connection.status === "unavailable") {
+    const message = connection.message?.trim();
+
+    if (message === undefined || message === "" || message.includes("loopback http")) {
+      return t(locale, "gatewayQuickConnect.invalidLocalUrl");
+    }
+
+    return message;
+  }
+
+  return t(locale, "gatewayQuickConnect.protectedCopy");
 }
 
 function loadStoredWorkspaceViewMode(): WorkspaceViewMode {
@@ -613,6 +670,7 @@ export function App(): ReactElement {
   >({});
   const [contextMenu, setContextMenu] = useState<CanvasContextMenuState | null>(null);
   const [isDemoGuideOpen, setIsDemoGuideOpen] = useState(false);
+  const [isTaskLauncherOpen, setIsTaskLauncherOpen] = useState(false);
   const [exportPanelMode, setExportPanelMode] = useState<ExportPanelMode>("flow-json");
   const [openClawTaskCopyStatus, setOpenClawTaskCopyStatus] =
     useState<OpenClawTaskCopyStatus>("idle");
@@ -677,25 +735,54 @@ export function App(): ReactElement {
   const requestFlowEstimate = useFlowStore((state) => state.requestFlowEstimate);
   const requestRunReadinessReport = useFlowStore((state) => state.requestRunReadinessReport);
   const resetDemoFlow = useFlowStore((state) => state.resetDemoFlow);
+  const replaceFlow = useFlowStore((state) => state.replaceFlow);
   const clearRun = useFlowStore((state) => state.clearRun);
   const runtimes = useRuntimeStore((state) => state.runtimes);
   const runtimeHealth = useRuntimeStore((state) => state.runtimeHealth);
   const runtimeLoadStatus = useRuntimeStore((state) => state.runtimeLoadStatus);
   const runtimeError = useRuntimeStore((state) => state.runtimeError);
   const isRuntimeManagerOpen = useRuntimeStore((state) => state.isRuntimeManagerOpen);
+  const localGatewayConnection = useRuntimeStore((state) => state.localGatewayConnection);
+  const gatewayProfiles = useRuntimeStore((state) => state.gatewayProfiles);
+  const agentGatewayBindings = useRuntimeStore((state) => state.agentGatewayBindings);
   const openRuntimeManager = useRuntimeStore((state) => state.openRuntimeManager);
   const closeRuntimeManager = useRuntimeStore((state) => state.closeRuntimeManager);
   const loadRuntimes = useRuntimeStore((state) => state.loadRuntimes);
   const healthCheckAll = useRuntimeStore((state) => state.healthCheckAll);
+  const quickConnectOpenClaw = useRuntimeStore((state) => state.quickConnectOpenClaw);
+  const clearLocalGatewayConnection = useRuntimeStore(
+    (state) => state.clearLocalGatewayConnection
+  );
+  const addGatewayProfile = useRuntimeStore((state) => state.addGatewayProfile);
+  const updateGatewayProfile = useRuntimeStore((state) => state.updateGatewayProfile);
+  const deleteGatewayProfile = useRuntimeStore((state) => state.deleteGatewayProfile);
+  const checkGatewayProfile = useRuntimeStore((state) => state.checkGatewayProfile);
+  const setAgentGatewayBinding = useRuntimeStore((state) => state.setAgentGatewayBinding);
+  const clearAgentGatewayBindings = useRuntimeStore((state) => state.clearAgentGatewayBindings);
   const loadSession = useSessionStore((state) => state.loadSession);
   const runActiveSession = useSessionStore((state) => state.runActiveSession);
   const isNodeLibraryCollapsed = workspacePanelState.nodeLibraryCollapsed;
   const isInspectorCollapsed = workspacePanelState.inspectorCollapsed;
   const isRunInspectorCollapsed = workspacePanelState.runInspectorCollapsed;
+  const [gatewayBaseUrlInput, setGatewayBaseUrlInput] = useState(
+    localGatewayConnection.baseUrl
+  );
+  const [gatewayHealthPathInput, setGatewayHealthPathInput] = useState(
+    localGatewayConnection.healthPath
+  );
 
   useEffect(() => {
     void loadRuntimes();
   }, [loadRuntimes]);
+
+  useEffect(() => {
+    if (localGatewayConnection.status === "checking") {
+      return;
+    }
+
+    setGatewayBaseUrlInput(localGatewayConnection.baseUrl);
+    setGatewayHealthPathInput(localGatewayConnection.healthPath);
+  }, [localGatewayConnection.baseUrl, localGatewayConnection.healthPath, localGatewayConnection.status]);
 
   useEffect(() => {
     diagnosticsFlowRef.current = flow;
@@ -724,6 +811,25 @@ export function App(): ReactElement {
   const selectedNode = useMemo(
     () => flow.nodes.find((node) => node.id === selectedNodeId) ?? null,
     [flow.nodes, selectedNodeId]
+  );
+  const gatewayProfileUsage = useMemo(
+    () => createGatewayProfileUsage(flow.nodes, agentGatewayBindings),
+    [agentGatewayBindings, flow.nodes]
+  );
+  const selectedAgentGatewayBinding = useMemo<AgentGatewayBinding>(
+    () =>
+      selectedNode === null
+        ? { mode: "workspace-default" }
+        : agentGatewayBindings[selectedNode.id] ?? { mode: "workspace-default" },
+    [agentGatewayBindings, selectedNode]
+  );
+  const selectedGatewayProfile = useMemo(
+    () =>
+      selectedAgentGatewayBinding.mode === "profile"
+        ? gatewayProfiles.find((profile) => profile.id === selectedAgentGatewayBinding.profileId) ??
+          null
+        : null,
+    [gatewayProfiles, selectedAgentGatewayBinding]
   );
   const effectiveNodeDisplayMode = useMemo(
     () => resolveEffectiveNodeDisplayMode(nodeDisplayMode, workspaceViewMode),
@@ -759,6 +865,12 @@ export function App(): ReactElement {
             livePlanStepStatuses[node.id]
           ),
           estimateSummary: createNodeEstimateSummary(locale, estimatesByNodeId.get(node.id)),
+          gatewaySummary: createNodeGatewaySummary(
+            locale,
+            node,
+            agentGatewayBindings,
+            gatewayProfiles
+          ),
           companion: createNodeCompanionPresentation(nodeStatuses[node.id] ?? "idle")
         },
         selected: node.id === selectedNodeId
@@ -772,6 +884,8 @@ export function App(): ReactElement {
       linearExecutionPlan,
       livePlanStepStatuses,
       locale,
+      agentGatewayBindings,
+      gatewayProfiles,
       nodeDisplayOverrides,
       nodeStatuses,
       runtimes,
@@ -804,9 +918,24 @@ export function App(): ReactElement {
       buildOpenClawTaskExport({
         flow,
         linearExecutionPlan,
-        runReadinessReport
+        runReadinessReport,
+        localGatewayConnection,
+        gatewayProfiles,
+        agentGatewayBindings: createOpenClawTaskAgentGatewayBindings(
+          flow.nodes,
+          agentGatewayBindings,
+          gatewayProfiles,
+          localGatewayConnection
+        )
       }),
-    [flow, linearExecutionPlan, runReadinessReport]
+    [
+      agentGatewayBindings,
+      flow,
+      gatewayProfiles,
+      linearExecutionPlan,
+      localGatewayConnection,
+      runReadinessReport
+    ]
   );
   const isRunActive = runStatus === "queued" || runStatus === "running";
   const topStatusSeverity = runError !== null ? "error" : runWarning !== null ? "warning" : runStatus;
@@ -955,6 +1084,11 @@ export function App(): ReactElement {
         return;
       }
 
+      if (isTaskLauncherOpen) {
+        setIsTaskLauncherOpen(false);
+        return;
+      }
+
       if (workspaceViewMode !== "default") {
         setWorkspaceViewMode("default");
       }
@@ -963,7 +1097,7 @@ export function App(): ReactElement {
     window.addEventListener("keydown", handleKeyDown);
 
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [contextMenu, isDemoGuideOpen, setWorkspaceViewMode, workspaceViewMode]);
+  }, [contextMenu, isDemoGuideOpen, isTaskLauncherOpen, setWorkspaceViewMode, workspaceViewMode]);
 
   const handleNodesChange = useCallback<OnNodesChange<CanvasNode>>(
     (changes) => {
@@ -1102,6 +1236,25 @@ export function App(): ReactElement {
     void healthCheckAll();
   }, [healthCheckAll]);
 
+  const handleGatewayQuickConnect = useCallback(() => {
+    void quickConnectOpenClaw({
+      baseUrl: gatewayBaseUrlInput,
+      healthPath: gatewayHealthPathInput
+    });
+  }, [gatewayBaseUrlInput, gatewayHealthPathInput, quickConnectOpenClaw]);
+
+  const handleGatewayQuickConnectSubmit = useCallback(
+    (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      handleGatewayQuickConnect();
+    },
+    [handleGatewayQuickConnect]
+  );
+
+  const handleClearGatewayConnection = useCallback(() => {
+    clearLocalGatewayConnection();
+  }, [clearLocalGatewayConnection]);
+
   const handleRefreshExecutionContractPreview = useCallback(() => {
     void requestExecutionContractPreview(flow);
   }, [flow, requestExecutionContractPreview]);
@@ -1120,6 +1273,14 @@ export function App(): ReactElement {
 
   const closeDemoGuide = useCallback(() => {
     setIsDemoGuideOpen(false);
+  }, []);
+
+  const openTaskLauncher = useCallback(() => {
+    setIsTaskLauncherOpen(true);
+  }, []);
+
+  const closeTaskLauncher = useCallback(() => {
+    setIsTaskLauncherOpen(false);
   }, []);
 
   const handleOpenRuntimeManagerFromGuide = useCallback(() => {
@@ -1163,6 +1324,28 @@ export function App(): ReactElement {
     }
   }, []);
 
+  const handleCreateFlowFromTemplate = useCallback(
+    (input: TaskTemplateInput) => {
+      if (!window.confirm(t(locale, "taskLauncher.replaceConfirm"))) {
+        return;
+      }
+
+      const nextFlow = createFlowFromTaskTemplate(input);
+
+      closeActiveSocket();
+      replaceFlow(nextFlow);
+      clearAgentGatewayBindings();
+      setNodeDisplayOverrides({});
+      setContextMenu(null);
+      setIsTaskLauncherOpen(false);
+
+      window.setTimeout(() => {
+        void reactFlowInstanceRef.current?.fitView({ padding: 0.25, duration: 180 });
+      }, 0);
+    },
+    [clearAgentGatewayBindings, closeActiveSocket, locale, replaceFlow]
+  );
+
   const handleResetDemoFlow = useCallback(() => {
     if (!window.confirm(t(locale, "demoGuide.resetConfirm"))) {
       return;
@@ -1171,8 +1354,9 @@ export function App(): ReactElement {
     closeActiveSocket();
     resetDemoFlow();
     setNodeDisplayOverrides({});
+    clearAgentGatewayBindings();
     setContextMenu(null);
-  }, [closeActiveSocket, locale, resetDemoFlow]);
+  }, [clearAgentGatewayBindings, closeActiveSocket, locale, resetDemoFlow]);
 
   const refreshActiveSessionSnapshot = useCallback(() => {
     const sessionId = useSessionStore.getState().activeSessionId;
@@ -1452,6 +1636,41 @@ export function App(): ReactElement {
       }
     },
     [selectedNode, updateNode]
+  );
+
+  const handleGatewayBindingModeChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      if (selectedNode === null) {
+        return;
+      }
+
+      const mode = event.target.value;
+
+      if (mode === "profile") {
+        setAgentGatewayBinding(selectedNode.id, {
+          mode: "profile",
+          profileId: gatewayProfiles[0]?.id
+        });
+        return;
+      }
+
+      setAgentGatewayBinding(selectedNode.id, {
+        mode: "workspace-default"
+      });
+    },
+    [gatewayProfiles, selectedNode, setAgentGatewayBinding]
+  );
+
+  const handleGatewayProfileSelectionChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      if (selectedNode !== null) {
+        setAgentGatewayBinding(selectedNode.id, {
+          mode: "profile",
+          profileId: event.target.value
+        });
+      }
+    },
+    [selectedNode, setAgentGatewayBinding]
   );
 
   const handleHarnessChange = useCallback(
@@ -1843,6 +2062,15 @@ export function App(): ReactElement {
           </button>
           <button
             type="button"
+            title={t(locale, "taskLauncher.buttonTitle")}
+            data-testid="task-launcher-button"
+            onClick={openTaskLauncher}
+          >
+            <Plus aria-hidden="true" size={16} />
+            {t(locale, "taskLauncher.button")}
+          </button>
+          <button
+            type="button"
             title={t(locale, "demoGuide.buttonTitle")}
             data-testid="demo-guide-button"
             onClick={openDemoGuide}
@@ -1879,12 +2107,27 @@ export function App(): ReactElement {
           locale={locale}
           isLoading={runtimeLoadStatus === "loading"}
           error={runtimeError}
+          localGatewayConnection={localGatewayConnection}
+          gatewayProfiles={gatewayProfiles}
+          gatewayProfileUsage={gatewayProfileUsage}
           openClawTaskCopyStatus={openClawTaskCopyStatus}
           onClose={closeRuntimeManager}
           onRefresh={handleRefreshRuntimes}
           onHealthCheck={handleRuntimeHealthCheck}
+          onAddGatewayProfile={addGatewayProfile}
+          onUpdateGatewayProfile={updateGatewayProfile}
+          onDeleteGatewayProfile={deleteGatewayProfile}
+          onCheckGatewayProfile={checkGatewayProfile}
           onCopyOpenClawTask={handleCopyOpenClawTask}
           onOpenOpenClawTaskExport={handleOpenOpenClawTaskExport}
+        />
+      ) : null}
+
+      {isTaskLauncherOpen ? (
+        <TaskLauncherPanel
+          locale={locale}
+          onClose={closeTaskLauncher}
+          onCreateFlow={handleCreateFlowFromTemplate}
         />
       ) : null}
 
@@ -1933,6 +2176,69 @@ export function App(): ReactElement {
             data-testid="node-library-body"
             onWheel={stopPanelWheelPropagation}
           >
+            <form
+              className="gateway-quick-connect-card"
+              data-testid="gateway-quick-connect"
+              onSubmit={handleGatewayQuickConnectSubmit}
+            >
+              <div className="gateway-quick-connect-header">
+                <span>
+                  <Server aria-hidden="true" size={15} />
+                  <strong>{t(locale, "gatewayQuickConnect.title")}</strong>
+                </span>
+                <span
+                  className={`gateway-quick-connect-status status-${localGatewayConnection.status}`}
+                  data-testid="gateway-quick-connect-status"
+                >
+                  {t(locale, getLocalGatewayConnectionStatusKey(localGatewayConnection.status))}
+                </span>
+              </div>
+              <label>
+                <span>{t(locale, "gatewayQuickConnect.gatewayUrl")}</span>
+                <input
+                  type="url"
+                  value={gatewayBaseUrlInput}
+                  data-testid="gateway-url-input"
+                  placeholder="http://localhost:25311"
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => setGatewayBaseUrlInput(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>{t(locale, "gatewayQuickConnect.healthPath")}</span>
+                <input
+                  type="text"
+                  value={gatewayHealthPathInput}
+                  data-testid="gateway-health-path-input"
+                  placeholder="/health"
+                  autoComplete="off"
+                  spellCheck={false}
+                  onChange={(event) => setGatewayHealthPathInput(event.target.value)}
+                />
+              </label>
+              <div className="gateway-quick-connect-actions">
+                <button
+                  type="submit"
+                  data-testid="gateway-connect-button"
+                  disabled={localGatewayConnection.status === "checking"}
+                >
+                  {localGatewayConnection.status === "checking"
+                    ? t(locale, "gatewayQuickConnect.checking")
+                    : t(locale, "gatewayQuickConnect.connect")}
+                </button>
+                <button
+                  type="button"
+                  data-testid="gateway-clear-connection-button"
+                  onClick={handleClearGatewayConnection}
+                >
+                  {t(locale, "gatewayQuickConnect.clear")}
+                </button>
+              </div>
+              <p data-testid="gateway-quick-connect-message">
+                {formatLocalGatewayConnectionMessage(locale, localGatewayConnection)}
+              </p>
+            </form>
             <div className="node-list" data-testid="node-library-content">
               {MVP_NODE_CATALOG.map((node) => {
                 const Icon = nodeIcons[node.type];
@@ -2194,6 +2500,7 @@ export function App(): ReactElement {
                     <span>{t(locale, "inspector.runtimeRef")}</span>
                     <select
                       value={selectedNode.runtimeRef ?? ""}
+                      data-testid="inspector-runtime-select"
                       onChange={handleRuntimeChange}
                       disabled={runtimeLoadStatus === "loading" && runtimeOptions.length === 0}
                     >
@@ -2207,7 +2514,7 @@ export function App(): ReactElement {
                       ))}
                     </select>
                   </label>
-                  <div className="runtime-select-summary">
+                  <div className="runtime-select-summary" data-testid="inspector-runtime-summary">
                     {runtimeError !== null ? (
                       <span className="field-error-text">{runtimeError}</span>
                     ) : (
@@ -2217,12 +2524,70 @@ export function App(): ReactElement {
                       </span>
                     )}
                     {selectedNode.runtimeRef === "openclaw-local" ? (
-                      <span className="protected-runtime-note">
+                      <span className="protected-runtime-note" data-testid="inspector-openclaw-protected-note">
                         {t(locale, "inspector.openClawProtectedOnly")}
                       </span>
                     ) : null}
                   </div>
                 </section>
+
+                {isAgentNode(selectedNode) ? (
+                  <section className="inspector-card gateway-binding-card" data-testid="inspector-gateway-section">
+                    <h2>{t(locale, "gatewayProfiles.inspectorTitle")}</h2>
+                    <div className="field-stack">
+                      <label className="field-control">
+                        <span>{t(locale, "gatewayProfiles.bindingMode")}</span>
+                        <select
+                          value={selectedAgentGatewayBinding.mode}
+                          data-testid="inspector-gateway-binding-mode"
+                          onChange={handleGatewayBindingModeChange}
+                        >
+                          <option value="workspace-default">
+                            {t(locale, "gatewayProfiles.followWorkspaceDefault")}
+                          </option>
+                          <option value="profile">
+                            {t(locale, "gatewayProfiles.useGatewayProfile")}
+                          </option>
+                        </select>
+                      </label>
+                      {selectedAgentGatewayBinding.mode === "profile" ? (
+                        <label className="field-control">
+                          <span>{t(locale, "gatewayProfiles.profileName")}</span>
+                          <select
+                            value={selectedAgentGatewayBinding.profileId ?? gatewayProfiles[0]?.id ?? ""}
+                            data-testid="inspector-gateway-profile-select"
+                            onChange={handleGatewayProfileSelectionChange}
+                          >
+                            {gatewayProfiles.map((profile) => (
+                              <option key={profile.id} value={profile.id}>
+                                {profile.name} / {formatGatewayProfileStatus(locale, profile)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
+                      <div className="gateway-binding-summary" data-testid="inspector-gateway-status">
+                        <strong>
+                          {selectedAgentGatewayBinding.mode === "profile" && selectedGatewayProfile !== null
+                            ? selectedGatewayProfile.name
+                            : t(locale, "gatewayProfiles.workspaceDefault")}
+                        </strong>
+                        <span>
+                          {selectedAgentGatewayBinding.mode === "profile" && selectedGatewayProfile !== null
+                            ? formatGatewayProfileStatus(locale, selectedGatewayProfile)
+                            : t(locale, getLocalGatewayConnectionStatusKey(localGatewayConnection.status))}
+                        </span>
+                        <small>{t(locale, "gatewayProfiles.uiPreferenceOnly")}</small>
+                        {selectedAgentGatewayBinding.mode === "profile" &&
+                        selectedGatewayProfile?.status === "unavailable" ? (
+                          <small className="field-error-text" data-testid="inspector-gateway-warning">
+                            {t(locale, "gatewayProfiles.unavailableWarning")}
+                          </small>
+                        ) : null}
+                      </div>
+                    </div>
+                  </section>
+                ) : null}
 
                 <HarnessInspector
                   locale={locale}
@@ -3406,6 +3771,108 @@ function formatRuntimeSelection(
   }
 
   return `${t(locale, "inspector.selectedRuntime")}: ${runtime.name} / ${runtime.type} / ${runtime.status}`;
+}
+
+function isAgentNode(node: FlowNode): boolean {
+  return node.type.startsWith("agent.");
+}
+
+function formatGatewayProfileStatus(locale: Locale, profile: GatewayProfile): string {
+  return t(locale, getLocalGatewayConnectionStatusKey(profile.status));
+}
+
+function createGatewayProfileUsage(
+  nodes: FlowNode[],
+  bindings: Record<string, AgentGatewayBinding>
+): Record<string, string[]> {
+  const usage: Record<string, string[]> = {};
+
+  for (const node of nodes) {
+    const binding = bindings[node.id];
+
+    if (!isAgentNode(node) || binding?.mode !== "profile" || binding.profileId === undefined) {
+      continue;
+    }
+
+    usage[binding.profileId] = [...(usage[binding.profileId] ?? []), node.label];
+  }
+
+  return usage;
+}
+
+function createNodeGatewaySummary(
+  locale: Locale,
+  node: FlowNode,
+  bindings: Record<string, AgentGatewayBinding>,
+  profiles: GatewayProfile[]
+): ClawFlowNodeData["gatewaySummary"] {
+  const binding = bindings[node.id];
+
+  if (!isAgentNode(node) || binding?.mode !== "profile" || binding.profileId === undefined) {
+    return undefined;
+  }
+
+  const profile = profiles.find((candidate) => candidate.id === binding.profileId);
+
+  if (profile === undefined) {
+    return {
+      label: t(locale, "gatewayProfiles.customGateway"),
+      status: t(locale, "common.notAvailable"),
+      hasWarning: true
+    };
+  }
+
+  return {
+    label: profile.name,
+    status: formatGatewayProfileStatus(locale, profile),
+    hasWarning: profile.status === "unavailable"
+  };
+}
+
+function createOpenClawTaskAgentGatewayBindings(
+  nodes: FlowNode[],
+  bindings: Record<string, AgentGatewayBinding>,
+  profiles: GatewayProfile[],
+  workspaceDefault: LocalGatewayConnection
+): Array<Record<string, unknown>> {
+  return nodes.filter(isAgentNode).map((node) => {
+    const binding = bindings[node.id] ?? { mode: "workspace-default" as const };
+    const profile =
+      binding.mode === "profile"
+        ? profiles.find((candidate) => candidate.id === binding.profileId)
+        : undefined;
+
+    return {
+      nodeId: node.id,
+      nodeType: node.type,
+      label: node.label,
+      bindingMode: binding.mode,
+      profileId: binding.mode === "profile" ? binding.profileId : undefined,
+      resolvedGateway:
+        profile === undefined
+          ? {
+              source: "workspace-default",
+              baseUrl: workspaceDefault.baseUrl,
+              healthPath: workspaceDefault.healthPath,
+              healthUrl: workspaceDefault.healthUrl,
+              status: workspaceDefault.status,
+              protected: true,
+              checkedAt: workspaceDefault.checkedAt
+            }
+          : {
+              source: "profile",
+              profileId: profile.id,
+              name: profile.name,
+              baseUrl: profile.baseUrl,
+              healthPath: profile.healthPath,
+              healthUrl: profile.healthUrl,
+              status: profile.status,
+              protected: profile.protected,
+              checkedAt: profile.lastCheckedAt,
+              lastError: profile.lastError
+            }
+    };
+  });
 }
 
 function createRuntimeLookup(runtimes: RuntimeSpec[]): {
