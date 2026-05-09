@@ -46,6 +46,7 @@ import {
 } from "@clawflow/runtime-registry/harnesses";
 import {
   Braces,
+  BookOpen,
   ChevronDown,
   ChevronUp,
   CircleStop,
@@ -79,6 +80,7 @@ import {
   type ClawFlowNodeData,
   type EffectiveNodeDisplayMode
 } from "./components/ClawFlowNode";
+import { DemoGuidePanel } from "./components/DemoGuidePanel";
 import { DismissibleAlert } from "./components/DismissibleAlert";
 import { ExecutionContractPreviewPanel } from "./components/ExecutionContractPreviewPanel";
 import { HarnessInspector } from "./components/HarnessInspector";
@@ -607,6 +609,7 @@ export function App(): ReactElement {
     Partial<Record<string, EffectiveNodeDisplayMode>>
   >({});
   const [contextMenu, setContextMenu] = useState<CanvasContextMenuState | null>(null);
+  const [isDemoGuideOpen, setIsDemoGuideOpen] = useState(false);
   const locale = useLocaleStore((state) => state.locale);
   const setLocale = useLocaleStore((state) => state.setLocale);
   const flow = useFlowStore((state) => state.flow);
@@ -667,6 +670,7 @@ export function App(): ReactElement {
   const requestLinearExecutionPlan = useFlowStore((state) => state.requestLinearExecutionPlan);
   const requestFlowEstimate = useFlowStore((state) => state.requestFlowEstimate);
   const requestRunReadinessReport = useFlowStore((state) => state.requestRunReadinessReport);
+  const resetDemoFlow = useFlowStore((state) => state.resetDemoFlow);
   const clearRun = useFlowStore((state) => state.clearRun);
   const runtimes = useRuntimeStore((state) => state.runtimes);
   const runtimeHealth = useRuntimeStore((state) => state.runtimeHealth);
@@ -931,6 +935,11 @@ export function App(): ReactElement {
         return;
       }
 
+      if (isDemoGuideOpen) {
+        setIsDemoGuideOpen(false);
+        return;
+      }
+
       if (workspaceViewMode !== "default") {
         setWorkspaceViewMode("default");
       }
@@ -939,7 +948,7 @@ export function App(): ReactElement {
     window.addEventListener("keydown", handleKeyDown);
 
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [contextMenu, setWorkspaceViewMode, workspaceViewMode]);
+  }, [contextMenu, isDemoGuideOpen, setWorkspaceViewMode, workspaceViewMode]);
 
   const handleNodesChange = useCallback<OnNodesChange<CanvasNode>>(
     (changes) => {
@@ -1059,6 +1068,19 @@ export function App(): ReactElement {
     void requestFlowEstimate(flow);
   }, [flow, requestFlowEstimate]);
 
+  const openDemoGuide = useCallback(() => {
+    setIsDemoGuideOpen(true);
+  }, []);
+
+  const closeDemoGuide = useCallback(() => {
+    setIsDemoGuideOpen(false);
+  }, []);
+
+  const handleOpenRuntimeManagerFromGuide = useCallback(() => {
+    setIsDemoGuideOpen(false);
+    openRuntimeManager();
+  }, [openRuntimeManager]);
+
   const handleLocaleChange = useCallback(
     (event: ChangeEvent<HTMLSelectElement>) => {
       setLocale(event.target.value as Locale);
@@ -1094,6 +1116,17 @@ export function App(): ReactElement {
       socketToClose.close();
     }
   }, []);
+
+  const handleResetDemoFlow = useCallback(() => {
+    if (!window.confirm(t(locale, "demoGuide.resetConfirm"))) {
+      return;
+    }
+
+    closeActiveSocket();
+    resetDemoFlow();
+    setNodeDisplayOverrides({});
+    setContextMenu(null);
+  }, [closeActiveSocket, locale, resetDemoFlow]);
 
   const refreshActiveSessionSnapshot = useCallback(() => {
     const sessionId = useSessionStore.getState().activeSessionId;
@@ -1764,6 +1797,15 @@ export function App(): ReactElement {
           </button>
           <button
             type="button"
+            title={t(locale, "demoGuide.buttonTitle")}
+            data-testid="demo-guide-button"
+            onClick={openDemoGuide}
+          >
+            <BookOpen aria-hidden="true" size={16} />
+            {t(locale, "demoGuide.button")}
+          </button>
+          <button
+            type="button"
             title={t(locale, "workspacePreset.resetTitle")}
             data-testid="reset-layout-button"
             onClick={resetLayout}
@@ -1794,6 +1836,15 @@ export function App(): ReactElement {
           onClose={closeRuntimeManager}
           onRefresh={handleRefreshRuntimes}
           onHealthCheck={handleRuntimeHealthCheck}
+        />
+      ) : null}
+
+      {isDemoGuideOpen ? (
+        <DemoGuidePanel
+          locale={locale}
+          onClose={closeDemoGuide}
+          onOpenRuntimeManager={handleOpenRuntimeManagerFromGuide}
+          onResetDemoFlow={handleResetDemoFlow}
         />
       ) : null}
 

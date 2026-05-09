@@ -2,6 +2,8 @@
 
 This walkthrough is for invited private beta testers only. Keep the repository URL, screenshots, recordings, logs, and feedback private.
 
+For the shortest guided path, use the in-app Guide button or the [Private Beta Demo Guide](../private-beta-demo-guide.md).
+
 ## What This MVP Is
 
 ClawFlow Studio is a local WebUI-first Agent workflow workbench. This MVP focuses on canvas editing, local mock execution, session history, intervention controls, advisory diagnostics, and private beta feedback.

@@ -70,6 +70,7 @@ test("app loads with default workspace nodes and no fatal console errors", async
   await expect(page.getByTestId("save-flow-button")).toBeVisible();
   await expect(page.getByTestId("export-json-button")).toBeVisible();
   await expect(page.getByTestId("runtime-manager-button")).toBeVisible();
+  await expect(page.getByTestId("demo-guide-button")).toBeVisible();
   await expect(page.getByTestId("reset-layout-button")).toBeVisible();
   await expect(page.getByTestId("node-library-content")).toBeVisible();
   await expect(page.getByTestId("session-console-panel")).toBeVisible();
@@ -101,6 +102,7 @@ test("workspace header remains usable across common desktop widths", async ({ pa
     await expect(page.getByTestId("save-flow-button")).toBeVisible();
     await expect(page.getByTestId("export-json-button")).toBeVisible();
     await expect(page.getByTestId("runtime-manager-button")).toBeVisible();
+    await expect(page.getByTestId("demo-guide-button")).toBeVisible();
     await expect(page.getByTestId("reset-layout-button")).toBeVisible();
     await expect(page.getByLabel("Language")).toBeVisible();
 
@@ -120,6 +122,7 @@ test("workspace header remains usable across common desktop widths", async ({ pa
       "save-flow-button",
       "export-json-button",
       "runtime-manager-button",
+      "demo-guide-button",
       "reset-layout-button"
     ];
 
@@ -145,6 +148,59 @@ test("workspace header remains usable across common desktop widths", async ({ pa
       .evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
     expect(nodeViewFits).toBe(true);
   }
+});
+
+test("demo guide explains the beta path and reset demo flow restores defaults", async ({ page }) => {
+  await page.getByLabel("Language").selectOption("en");
+
+  await page.getByTestId("node-library-item-agent-worker").click();
+  await expect(page.getByTestId("node-node-agent-worker-2")).toBeVisible();
+
+  await page.getByTestId("demo-guide-button").evaluate((element) =>
+    element.scrollIntoView({ block: "nearest", inline: "center" })
+  );
+  await page.getByTestId("demo-guide-button").click();
+  await expect(page.getByTestId("demo-guide-panel")).toBeVisible();
+  await expect(page.getByTestId("demo-guide-path")).toContainText("Builder preset");
+  await expect(page.getByTestId("demo-guide-path")).toContainText("mock-local");
+  await expect(page.getByTestId("beta-limitations")).toContainText("mock-local");
+  await expect(page.getByTestId("beta-limitations")).toContainText("Protected dry run");
+  await expect(page.getByTestId("beta-limitations")).toContainText("not enabled");
+
+  page.once("dialog", (dialog) => {
+    expect(dialog.message()).toContain("Reset");
+    void dialog.accept();
+  });
+  await page.getByTestId("reset-demo-flow-button").click();
+
+  await expect(page.getByTestId("node-node-agent-worker-2")).toBeHidden();
+  for (const nodeId of Object.values(NODE_IDS)) {
+    await expect(page.getByTestId(nodeId)).toBeVisible();
+  }
+  await expect.poll(() => edgeCount(page)).toBe(4);
+  await expect(page.getByTestId("run-inspector")).toContainText("No Active Session");
+
+  await page.getByLabel("Language").selectOption("zh-CN");
+  await expect(page.getByTestId("demo-guide-panel")).toContainText("Demo 指南");
+  await expect(page.getByTestId("beta-limitations")).toContainText("受保护 dry-run");
+  await expect(page.getByTestId("beta-limitations")).toContainText("尚未启用");
+
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("demo-guide-panel")).toBeHidden();
+});
+
+test("first-run empty states give actionable local demo guidance", async ({ page }) => {
+  await page.getByLabel("Language").selectOption("en");
+
+  await minimizeWorkspacePanels(page);
+  await openCanvasContextMenu(page);
+  await page.getByTestId("context-menu-clear-selection").click();
+
+  await expect(page.getByTestId("inspector-pane")).toContainText("No Node Selected");
+  await expect(page.getByTestId("inspector-pane")).toContainText("Open Guide");
+  await expect(page.getByTestId("run-inspector")).toContainText("Click Run to execute the safe mock demo");
+  await expect(page.getByTestId("run-inspector")).toContainText("Run the mock flow");
+  await expect(page.getByTestId("run-readiness-preview")).toContainText("Advisory preflight");
 });
 
 test("workspace view modes hide, restore, and persist layout preferences", async ({ page }) => {
@@ -1197,6 +1253,7 @@ async function expectTopBarControlsReachable(page: Page): Promise<void> {
     "save-flow-button",
     "export-json-button",
     "runtime-manager-button",
+    "demo-guide-button",
     "reset-layout-button"
   ]) {
     const control = page.getByTestId(testId);

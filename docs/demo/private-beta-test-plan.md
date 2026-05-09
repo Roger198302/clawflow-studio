@@ -8,7 +8,7 @@ This beta is not a production release. It does not include real OpenClaw, Hermes
 
 Keep the repository URL, screenshots, recordings, logs, and feedback private to invited testers and approved maintainers. Do not post beta material publicly.
 
-For a tester-friendly path through the MVP, start with [Private Beta Tester Guide](private-beta-tester-guide.md) and [Private Beta Walkthrough](private-beta-walkthrough.md).
+For a tester-friendly path through the MVP, start with the [Private Beta Demo Guide](../private-beta-demo-guide.md), [Private Beta Tester Guide](private-beta-tester-guide.md), and [Private Beta Walkthrough](private-beta-walkthrough.md).
 
 ## Test Boundary
 

@@ -131,6 +131,7 @@ export interface FlowStoreState {
   requestLinearExecutionPlan: (flow: FlowSpec) => Promise<LinearExecutionPlan | null>;
   requestFlowEstimate: (flow: FlowSpec) => Promise<FlowEstimate | null>;
   requestRunReadinessReport: (flow: FlowSpec) => Promise<RunReadinessReport | null>;
+  resetDemoFlow: () => void;
   clearRun: () => void;
 }
 
@@ -1029,6 +1030,39 @@ export const useFlowStore = create<FlowStoreState>((set) => ({
 
       return null;
     }
+  },
+  resetDemoFlow: () => {
+    const nextFlow = createDefaultFlow();
+
+    set({
+      flow: nextFlow,
+      selectedNodeId: nextFlow.nodes[0]?.id ?? null,
+      nodeStatuses: createInitialStatuses(nextFlow),
+      saveNotice: null,
+      currentRunId: null,
+      runEvents: [],
+      runLogs: [],
+      selectedRunEventId: null,
+      runStatus: "idle",
+      runError: null,
+      runWarning: null,
+      runAlert: null,
+      runStartedAt: null,
+      runCompletedAt: null,
+      executionContractPreview: null,
+      executionContractPreviewLoading: false,
+      executionContractPreviewError: null,
+      linearExecutionPlan: null,
+      linearExecutionPlanLoading: false,
+      linearExecutionPlanError: null,
+      flowEstimate: null,
+      flowEstimateLoading: false,
+      flowEstimateError: null,
+      runReadinessReport: null,
+      runReadinessLoading: false,
+      runReadinessError: null,
+      livePlanStepStatuses: {}
+    });
   },
   clearRun: () => {
     set((state) => ({

@@ -40,6 +40,7 @@ ClawFlow Studio is currently suitable for a private, local-only hidden beta focu
 
 Beta testers should use the private beta materials:
 
+- [Private Beta Demo Guide](docs/private-beta-demo-guide.md)
 - [Private Beta Tester Guide](docs/demo/private-beta-tester-guide.md)
 - [Private Beta Walkthrough](docs/demo/private-beta-walkthrough.md)
 - [Private Beta Test Plan](docs/demo/private-beta-test-plan.md)
