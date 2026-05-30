@@ -81,6 +81,7 @@ import {
   type ClawFlowNodeData,
   type EffectiveNodeDisplayMode
 } from "./components/ClawFlowNode";
+import { BeginnerStartCard } from "./components/BeginnerStartCard";
 import { DemoGuidePanel } from "./components/DemoGuidePanel";
 import { DismissibleAlert } from "./components/DismissibleAlert";
 import { ExecutionContractPreviewPanel } from "./components/ExecutionContractPreviewPanel";
@@ -89,6 +90,12 @@ import { LinearExecutionPlanPanel } from "./components/LinearExecutionPlanPanel"
 import { ResourceEstimatePanel } from "./components/ResourceEstimatePanel";
 import { RuntimeManagerPanel } from "./components/RuntimeManagerPanel";
 import { SessionConsole } from "./components/SessionConsole";
+import {
+  readSimpleNodeSetup,
+  SimpleNodeSetupPanel,
+  type SimpleNodeConnectionType,
+  type SimpleNodeSetupData
+} from "./components/SimpleNodeSetupPanel";
 import { TaskLauncherPanel } from "./components/TaskLauncherPanel";
 import { getCatalogDescription, getCatalogLabel, MVP_NODE_CATALOG } from "./flowCatalog";
 import { createFlowFromTaskTemplate, type TaskTemplateInput } from "./flowTemplates";
@@ -125,6 +132,7 @@ const WORKSPACE_VIEW_MODE_STORAGE_KEY = "clawflow.workspaceViewMode";
 const NODE_DISPLAY_MODE_STORAGE_KEY = "clawflow.nodeDisplayMode";
 const WORKSPACE_PRESET_STORAGE_KEY = "clawflow.workspacePreset";
 const WORKSPACE_PANEL_STATE_STORAGE_KEY = "clawflow.workspacePanelState";
+const EXPERIENCE_MODE_STORAGE_KEY = "clawflow.experienceMode";
 const CONTEXT_MENU_WIDTH = 224;
 const CONTEXT_MENU_MARGIN = 8;
 const CONTEXT_MENU_ROW_HEIGHT = 34;
@@ -135,6 +143,8 @@ const nodeDisplayModes = ["auto", "compact", "standard", "detailed", "trace"] as
 type NodeDisplayMode = (typeof nodeDisplayModes)[number];
 const workspacePresets = ["builder", "runner", "reviewer", "presenter", "custom"] as const;
 type WorkspacePreset = (typeof workspacePresets)[number];
+const experienceModes = ["simple", "advanced"] as const;
+type ExperienceMode = (typeof experienceModes)[number];
 type CanvasContextMenuKind = "pane" | "node" | "edge";
 type ExportPanelMode = "flow-json" | "openclaw-task";
 type OpenClawTaskCopyStatus = "idle" | "success" | "error";
@@ -162,6 +172,11 @@ const workspacePresetLabelKeys: Record<WorkspacePreset, I18nKey> = {
   custom: "workspacePreset.custom"
 };
 
+const experienceModeLabelKeys: Record<ExperienceMode, I18nKey> = {
+  simple: "experienceMode.simple",
+  advanced: "experienceMode.advanced"
+};
+
 const nodeOverrideDisplayModes: EffectiveNodeDisplayMode[] = [
   "compact",
   "standard",
@@ -183,6 +198,38 @@ const nodeIcons: Record<NodeType, LucideIcon> = {
   "agent.end": CircleStop,
   "output.console": SquareTerminal
 };
+
+interface SimpleNodeLibraryItem {
+  type: NodeType;
+  labelKey: I18nKey;
+  descriptionKey: I18nKey;
+  helperKey: I18nKey;
+  defaultLabelKey: I18nKey;
+}
+
+const simpleNodeLibraryItems: SimpleNodeLibraryItem[] = [
+  {
+    type: "manual.trigger",
+    labelKey: "node.simpleStart.label",
+    descriptionKey: "node.simpleStart.description",
+    helperKey: "node.simpleStart.helper",
+    defaultLabelKey: "node.simpleStart.label"
+  },
+  {
+    type: "agent.worker",
+    labelKey: "node.simpleAgentStep.label",
+    descriptionKey: "node.simpleAgentStep.description",
+    helperKey: "node.simpleAgentStep.helper",
+    defaultLabelKey: "node.simpleAgentStep.label"
+  },
+  {
+    type: "output.console",
+    labelKey: "node.simpleOutput.label",
+    descriptionKey: "node.simpleOutput.description",
+    helperKey: "node.simpleOutput.helper",
+    defaultLabelKey: "node.simpleOutput.label"
+  }
+];
 
 const roleLabelKeys: Record<NodeRole, I18nKey> = {
   trigger: "role.trigger",
@@ -339,6 +386,10 @@ function isWorkspacePreset(value: string | null): value is WorkspacePreset {
   return workspacePresets.some((preset) => preset === value);
 }
 
+function isExperienceMode(value: string | null): value is ExperienceMode {
+  return experienceModes.some((mode) => mode === value);
+}
+
 function getLocalGatewayConnectionStatusKey(status: LocalGatewayConnectionStatus): I18nKey {
   if (status === "checking") {
     return "gatewayQuickConnect.checking";
@@ -405,6 +456,12 @@ function loadStoredWorkspacePreset(): WorkspacePreset {
   return isWorkspacePreset(storedValue) ? storedValue : "custom";
 }
 
+function loadStoredExperienceMode(): ExperienceMode {
+  const storedValue = window.localStorage.getItem(EXPERIENCE_MODE_STORAGE_KEY);
+
+  return isExperienceMode(storedValue) ? storedValue : "simple";
+}
+
 function isWorkspacePanelState(value: unknown): value is WorkspacePanelState {
   if (typeof value !== "object" || value === null) {
     return false;
@@ -447,13 +504,18 @@ function storeWorkspacePreset(preset: WorkspacePreset): void {
   window.localStorage.setItem(WORKSPACE_PRESET_STORAGE_KEY, preset);
 }
 
+function storeExperienceMode(mode: ExperienceMode): void {
+  window.localStorage.setItem(EXPERIENCE_MODE_STORAGE_KEY, mode);
+}
+
 function storeWorkspacePanelState(panelState: WorkspacePanelState): void {
   window.localStorage.setItem(WORKSPACE_PANEL_STATE_STORAGE_KEY, JSON.stringify(panelState));
 }
 
 function resolveEffectiveNodeDisplayMode(
   nodeDisplayMode: NodeDisplayMode,
-  workspaceViewMode: WorkspaceViewMode
+  workspaceViewMode: WorkspaceViewMode,
+  experienceMode: ExperienceMode
 ): EffectiveNodeDisplayMode {
   if (nodeDisplayMode !== "auto") {
     return nodeDisplayMode;
@@ -469,6 +531,10 @@ function resolveEffectiveNodeDisplayMode(
 
   if (workspaceViewMode === "debug") {
     return "detailed";
+  }
+
+  if (experienceMode === "simple") {
+    return "compact";
   }
 
   return "standard";
@@ -662,9 +728,14 @@ export function App(): ReactElement {
   const [workspacePreset, setWorkspacePresetState] = useState<WorkspacePreset>(
     loadStoredWorkspacePreset
   );
+  const [experienceMode, setExperienceModeState] = useState<ExperienceMode>(
+    loadStoredExperienceMode
+  );
   const [workspacePanelState, setWorkspacePanelState] = useState<WorkspacePanelState>(
     loadStoredWorkspacePanelState
   );
+  const [isInspectorAdvancedSettingsOpen, setIsInspectorAdvancedSettingsOpen] =
+    useState(false);
   const [nodeDisplayOverrides, setNodeDisplayOverrides] = useState<
     Partial<Record<string, EffectiveNodeDisplayMode>>
   >({});
@@ -772,6 +843,10 @@ export function App(): ReactElement {
   );
 
   useEffect(() => {
+    setIsInspectorAdvancedSettingsOpen(experienceMode === "advanced");
+  }, [experienceMode, selectedNodeId]);
+
+  useEffect(() => {
     void loadRuntimes();
   }, [loadRuntimes]);
 
@@ -832,9 +907,10 @@ export function App(): ReactElement {
     [gatewayProfiles, selectedAgentGatewayBinding]
   );
   const effectiveNodeDisplayMode = useMemo(
-    () => resolveEffectiveNodeDisplayMode(nodeDisplayMode, workspaceViewMode),
-    [nodeDisplayMode, workspaceViewMode]
+    () => resolveEffectiveNodeDisplayMode(nodeDisplayMode, workspaceViewMode, experienceMode),
+    [experienceMode, nodeDisplayMode, workspaceViewMode]
   );
+  const shouldShowTechnicalPreviews = experienceMode === "advanced" || workspaceViewMode === "debug";
 
   const canvasNodes = useMemo<CanvasNode[]>(
     () => {
@@ -847,9 +923,11 @@ export function App(): ReactElement {
         type: "clawflowNode",
         position: node.position,
         data: {
-          label: node.label,
+          label: createNodePresentationLabel(locale, node, experienceMode),
           nodeType: node.type,
           displayMode: nodeDisplayOverrides[node.id] ?? effectiveNodeDisplayMode,
+          isSimpleExperience: experienceMode === "simple",
+          simpleSummary: createSimpleNodeSummary(locale, node),
           role: node.role,
           roleLabel: t(locale, "nodeCard.role"),
           runtimeRef: node.runtimeRef ?? "mock-local",
@@ -871,6 +949,12 @@ export function App(): ReactElement {
             agentGatewayBindings,
             gatewayProfiles
           ),
+          outcomeSummary: createNodeOutcomeSummary(
+            locale,
+            node,
+            runEvents,
+            nodeStatuses[node.id] ?? "idle"
+          ),
           companion: createNodeCompanionPresentation(nodeStatuses[node.id] ?? "idle")
         },
         selected: node.id === selectedNodeId
@@ -878,6 +962,7 @@ export function App(): ReactElement {
     },
     [
       effectiveNodeDisplayMode,
+      experienceMode,
       executionContractPreview,
       flowEstimate,
       flow.nodes,
@@ -888,6 +973,7 @@ export function App(): ReactElement {
       gatewayProfiles,
       nodeDisplayOverrides,
       nodeStatuses,
+      runEvents,
       runtimes,
       selectedNodeId
     ]
@@ -948,6 +1034,18 @@ export function App(): ReactElement {
     () => createNodeIoView(locale, runEvents, selectedNodeId, selectedNode),
     [locale, runEvents, selectedNode, selectedNodeId]
   );
+  const selectedNodeOutcome = useMemo<NonNullable<ClawFlowNodeData["outcomeSummary"]> | null>(
+    () =>
+      selectedNode === null
+        ? null
+        : createNodeOutcomeSummary(
+            locale,
+            selectedNode,
+            runEvents,
+            nodeStatuses[selectedNode.id] ?? "idle"
+          ),
+    [locale, nodeStatuses, runEvents, selectedNode]
+  );
   const selectedRunEvent = useMemo(
     () => runEvents.find((event) => event.id === selectedRunEventId) ?? null,
     [runEvents, selectedRunEventId]
@@ -989,6 +1087,11 @@ export function App(): ReactElement {
     },
     [setWorkspacePreset]
   );
+
+  const setExperienceMode = useCallback((mode: ExperienceMode) => {
+    setExperienceModeState(mode);
+    storeExperienceMode(mode);
+  }, []);
 
   const updateWorkspacePanelState = useCallback(
     (patch: Partial<WorkspacePanelState>, options?: { markCustom?: boolean }) => {
@@ -1035,8 +1138,9 @@ export function App(): ReactElement {
     setNodeDisplayOverrides({});
     storeWorkspaceViewMode("default");
     storeNodeDisplayMode("auto");
+    setExperienceMode("simple");
     storeWorkspacePanelState(DEFAULT_WORKSPACE_PANEL_STATE);
-  }, [setWorkspacePreset]);
+  }, [setExperienceMode, setWorkspacePreset]);
 
   const hideNodeDetails = useCallback((nodeId: string) => {
     setNodeDisplayOverrides((currentOverrides) => ({
@@ -1309,6 +1413,13 @@ export function App(): ReactElement {
     [setNodeDisplayMode]
   );
 
+  const handleExperienceModeChange = useCallback(
+    (event: ChangeEvent<HTMLSelectElement>) => {
+      setExperienceMode(event.target.value as ExperienceMode);
+    },
+    [setExperienceMode]
+  );
+
   const handleWorkspacePresetChange = useCallback(
     (event: ChangeEvent<HTMLSelectElement>) => {
       applyWorkspacePreset(event.target.value as WorkspacePreset);
@@ -1345,6 +1456,26 @@ export function App(): ReactElement {
     },
     [clearAgentGatewayBindings, closeActiveSocket, locale, replaceFlow]
   );
+
+  const handleStartHelloWorldFromGuide = useCallback(() => {
+    if (!window.confirm(t(locale, "taskLauncher.replaceConfirm"))) {
+      return;
+    }
+
+    const nextFlow = createFlowFromTaskTemplate({ templateId: "hello-world" });
+
+    closeActiveSocket();
+    replaceFlow(nextFlow);
+    clearAgentGatewayBindings();
+    setNodeDisplayOverrides({});
+    setContextMenu(null);
+    setIsDemoGuideOpen(false);
+    applyWorkspacePreset("builder");
+
+    window.setTimeout(() => {
+      void reactFlowInstanceRef.current?.fitView({ padding: 0.35, duration: 180 });
+    }, 0);
+  }, [applyWorkspacePreset, clearAgentGatewayBindings, closeActiveSocket, locale, replaceFlow]);
 
   const handleResetDemoFlow = useCallback(() => {
     if (!window.confirm(t(locale, "demoGuide.resetConfirm"))) {
@@ -1673,6 +1804,85 @@ export function App(): ReactElement {
     [selectedNode, setAgentGatewayBinding]
   );
 
+  const handleSimpleSetupChange = useCallback(
+    (patch: Partial<SimpleNodeSetupData>) => {
+      if (selectedNode === null) {
+        return;
+      }
+
+      const currentSetup = readSimpleNodeSetup(selectedNode, selectedAgentGatewayBinding);
+      const nextSetup = {
+        ...currentSetup,
+        ...patch
+      };
+      const nextData = {
+        ...(selectedNode.data ?? {}),
+        simpleSetup: nextSetup,
+        ...(patch.task !== undefined ? { objective: patch.task } : {})
+      };
+
+      updateNode(selectedNode.id, { data: nextData });
+    },
+    [selectedAgentGatewayBinding, selectedNode, updateNode]
+  );
+
+  const handleSimpleConnectionTypeChange = useCallback(
+    (connectionType: SimpleNodeConnectionType) => {
+      if (selectedNode === null) {
+        return;
+      }
+
+      const currentSetup = readSimpleNodeSetup(selectedNode, selectedAgentGatewayBinding);
+      handleSimpleSetupChange({
+        connectionType,
+        connectionValue:
+          connectionType === "url" || connectionType === "api" || connectionType === "manual"
+            ? currentSetup.connectionValue
+            : ""
+      });
+
+      if (connectionType === "gateway-profile") {
+        setAgentGatewayBinding(selectedNode.id, {
+          mode: "profile",
+          profileId: selectedAgentGatewayBinding.mode === "profile"
+            ? selectedAgentGatewayBinding.profileId
+            : gatewayProfiles[0]?.id
+        });
+        return;
+      }
+
+      if (connectionType === "workspace-gateway") {
+        setAgentGatewayBinding(selectedNode.id, {
+          mode: "workspace-default"
+        });
+      }
+    },
+    [
+      gatewayProfiles,
+      handleSimpleSetupChange,
+      selectedAgentGatewayBinding,
+      selectedNode,
+      setAgentGatewayBinding
+    ]
+  );
+
+  const handleSimpleGatewayProfileChange = useCallback(
+    (profileId: string) => {
+      if (selectedNode === null) {
+        return;
+      }
+
+      setAgentGatewayBinding(selectedNode.id, {
+        mode: "profile",
+        profileId
+      });
+      handleSimpleSetupChange({
+        connectionType: "gateway-profile"
+      });
+    },
+    [handleSimpleSetupChange, selectedNode, setAgentGatewayBinding]
+  );
+
   const handleHarnessChange = useCallback(
     (harnessRef: NodeHarnessRef | null) => {
       if (selectedNode !== null) {
@@ -1920,6 +2130,7 @@ export function App(): ReactElement {
       data-testid="studio-shell"
       data-workspace-mode={workspaceViewMode}
       data-workspace-preset={workspacePreset}
+      data-experience-mode={experienceMode}
     >
       <header className="top-bar" data-testid="top-bar">
         <div className="brand-lockup" data-testid="brand-lockup">
@@ -1961,6 +2172,25 @@ export function App(): ReactElement {
         />
 
         <nav className="top-actions" aria-label={t(locale, "top.workspaceActions")} data-testid="workspace-actions">
+          <label
+            className="experience-mode-switcher"
+            title={t(locale, "experienceMode.title")}
+            data-testid="experience-mode-control"
+          >
+            <span>{t(locale, "experienceMode.label")}</span>
+            <select
+              value={experienceMode}
+              onChange={handleExperienceModeChange}
+              aria-label={t(locale, "experienceMode.title")}
+              data-testid="experience-mode-select"
+            >
+              {experienceModes.map((mode) => (
+                <option key={mode} value={mode}>
+                  {t(locale, experienceModeLabelKeys[mode])}
+                </option>
+              ))}
+            </select>
+          </label>
           <label
             className="workspace-preset-switcher"
             title={t(locale, "workspacePreset.title")}
@@ -2137,6 +2367,7 @@ export function App(): ReactElement {
           onClose={closeDemoGuide}
           onOpenRuntimeManager={handleOpenRuntimeManagerFromGuide}
           onResetDemoFlow={handleResetDemoFlow}
+          onStartHelloWorld={handleStartHelloWorldFromGuide}
         />
       ) : null}
 
@@ -2153,7 +2384,9 @@ export function App(): ReactElement {
               {t(locale, "nodeLibrary.title")}
             </span>
             <span className="pane-title-summary" data-testid="node-library-summary">
-              {MVP_NODE_CATALOG.length} {t(locale, "common.nodes")}
+              {experienceMode === "simple"
+                ? `${simpleNodeLibraryItems.length} ${t(locale, "nodeLibrary.quickNodes")}`
+                : `${MVP_NODE_CATALOG.length} ${t(locale, "common.nodes")}`}
             </span>
             <button
               type="button"
@@ -2176,6 +2409,15 @@ export function App(): ReactElement {
             data-testid="node-library-body"
             onWheel={stopPanelWheelPropagation}
           >
+            {experienceMode === "simple" ? (
+              <BeginnerStartCard
+                locale={locale}
+                localGatewayConnection={localGatewayConnection}
+                onStartHelloWorld={handleStartHelloWorldFromGuide}
+                onConnectGateway={handleGatewayQuickConnect}
+                onExportTask={handleOpenOpenClawTaskExport}
+              />
+            ) : null}
             <form
               className="gateway-quick-connect-card"
               data-testid="gateway-quick-connect"
@@ -2239,31 +2481,68 @@ export function App(): ReactElement {
                 {formatLocalGatewayConnectionMessage(locale, localGatewayConnection)}
               </p>
             </form>
-            <div className="node-list" data-testid="node-library-content">
-              {MVP_NODE_CATALOG.map((node) => {
-                const Icon = nodeIcons[node.type];
+            {experienceMode === "simple" ? (
+              <>
+                <div className="node-library-mode-note" data-testid="simple-node-library-note">
+                  <strong>{t(locale, "nodeLibrary.simpleTitle")}</strong>
+                  <span>{t(locale, "nodeLibrary.simpleBody")}</span>
+                </div>
+                <div className="node-list simple-node-list" data-testid="node-library-content">
+                  {simpleNodeLibraryItems.map((node, index) => {
+                    const catalogItem = MVP_NODE_CATALOG.find((item) => item.type === node.type);
+                    const Icon = nodeIcons[node.type];
 
-                return (
-                  <button
-                    key={node.type}
-                    className={`node-list-item role-${node.role}`}
-                    data-testid={`node-library-item-${node.type.replaceAll(".", "-")}`}
-                    type="button"
-                    title={getCatalogDescription(node.type, locale)}
-                    onClick={() => addNode(node.type)}
-                  >
-                    <Icon aria-hidden="true" size={18} />
-                    <span>
-                      <strong>{getCatalogLabel(node.type, locale)}</strong>
-                      <small>
-                        {node.type} / {getRoleLabel(locale, node.role)}
-                      </small>
-                    </span>
-                    <Plus aria-hidden="true" className="node-add-icon" size={16} />
-                  </button>
-                );
-              })}
-            </div>
+                    return (
+                      <button
+                        key={node.type}
+                        className={`node-list-item simple-node-list-item role-${catalogItem?.role ?? "process"}`}
+                        data-testid={`node-library-item-${node.type.replaceAll(".", "-")}`}
+                        type="button"
+                        title={t(locale, node.descriptionKey)}
+                        onClick={() => addNode(node.type, undefined, t(locale, node.defaultLabelKey))}
+                      >
+                        <span className="simple-node-step" aria-hidden="true">
+                          {index + 1}
+                        </span>
+                        <Icon aria-hidden="true" size={17} />
+                        <span>
+                          <strong>{t(locale, node.labelKey)}</strong>
+                          <small>{t(locale, node.descriptionKey)}</small>
+                          <em>{t(locale, node.helperKey)}</em>
+                        </span>
+                        <Plus aria-hidden="true" className="node-add-icon" size={16} />
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className="node-list" data-testid="node-library-content">
+                {MVP_NODE_CATALOG.map((node) => {
+                  const Icon = nodeIcons[node.type];
+
+                  return (
+                    <button
+                      key={node.type}
+                      className={`node-list-item role-${node.role}`}
+                      data-testid={`node-library-item-${node.type.replaceAll(".", "-")}`}
+                      type="button"
+                      title={getCatalogDescription(node.type, locale)}
+                      onClick={() => addNode(node.type)}
+                    >
+                      <Icon aria-hidden="true" size={18} />
+                      <span>
+                        <strong>{getCatalogLabel(node.type, locale)}</strong>
+                        <small>
+                          {node.type} / {getRoleLabel(locale, node.role)}
+                        </small>
+                      </span>
+                      <Plus aria-hidden="true" className="node-add-icon" size={16} />
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </aside>
       ) : null}
@@ -2312,7 +2591,7 @@ export function App(): ReactElement {
             onRunSession={handleRunSession}
           />
         ) : null}
-        {workspaceVisibility.contractPreview ? (
+        {workspaceVisibility.contractPreview && shouldShowTechnicalPreviews ? (
           <ExecutionContractPreviewPanel
             locale={locale}
             preview={executionContractPreview}
@@ -2321,7 +2600,7 @@ export function App(): ReactElement {
             onRefresh={handleRefreshExecutionContractPreview}
           />
         ) : null}
-        {workspaceVisibility.linearPlan ? (
+        {workspaceVisibility.linearPlan && shouldShowTechnicalPreviews ? (
           <LinearExecutionPlanPanel
             locale={locale}
             plan={linearExecutionPlan}
@@ -2331,7 +2610,7 @@ export function App(): ReactElement {
             onRefresh={handleRefreshLinearExecutionPlan}
           />
         ) : null}
-        {workspaceVisibility.resourceEstimate ? (
+        {workspaceVisibility.resourceEstimate && shouldShowTechnicalPreviews ? (
           <ResourceEstimatePanel
             locale={locale}
             estimate={flowEstimate}
@@ -2494,6 +2773,44 @@ export function App(): ReactElement {
                   </div>
                 </section>
 
+                {selectedNodeOutcome !== null ? (
+                  <section className="inspector-card node-outcome-inspector" data-testid="inspector-node-outcome">
+                    <h2>{t(locale, "nodeOutcome.title")}</h2>
+                    <div className="node-outcome-inspector-grid">
+                      <span>{selectedNodeOutcome.purposeLabel}</span>
+                      <strong>{selectedNodeOutcome.purpose}</strong>
+                      <span>{selectedNodeOutcome.resultLabel}</span>
+                      <strong className={selectedNodeOutcome.hasOutput ? "has-output" : "is-empty"}>
+                        {selectedNodeOutcome.result}
+                      </strong>
+                    </div>
+                  </section>
+                ) : null}
+
+                <SimpleNodeSetupPanel
+                  locale={locale}
+                  node={selectedNode}
+                  gatewayProfiles={gatewayProfiles}
+                  gatewayBinding={selectedAgentGatewayBinding}
+                  localGatewayConnection={localGatewayConnection}
+                  selectedGatewayProfile={selectedGatewayProfile}
+                  onSetupChange={handleSimpleSetupChange}
+                  onConnectionTypeChange={handleSimpleConnectionTypeChange}
+                  onGatewayProfileChange={handleSimpleGatewayProfileChange}
+                />
+
+                <details
+                  className="inspector-advanced-settings"
+                  data-testid="inspector-advanced-settings"
+                  open={isInspectorAdvancedSettingsOpen}
+                  onToggle={(event) =>
+                    setIsInspectorAdvancedSettingsOpen(event.currentTarget.open)
+                  }
+                >
+                  <summary data-testid="inspector-advanced-summary">
+                    {t(locale, "simpleSetup.advancedSettings")}
+                  </summary>
+
                 <section className="inspector-card">
                   <h2>{t(locale, "inspector.runtime")}</h2>
                   <label className="field-control">
@@ -2621,6 +2938,7 @@ export function App(): ReactElement {
                     </label>
                   </div>
                 </section>
+                </details>
                 </>
               )}
             </div>
@@ -3068,6 +3386,8 @@ function NodeIoBlock({
     );
   }
 
+  const payloadSummary = summarizeRunEventPayload(locale, event);
+
   return (
     <section className="io-block">
       <div>
@@ -3076,6 +3396,12 @@ function NodeIoBlock({
           {event.nodeId ?? "-"} / {formatTimestamp(event.timestamp, locale)}
         </span>
       </div>
+      <p
+        className="io-summary"
+        data-testid={event.type === "node.output" ? "node-io-output-summary" : "node-io-input-summary"}
+      >
+        {payloadSummary}
+      </p>
       <pre>{prettyJson(event.payload ?? {})}</pre>
     </section>
   );
@@ -3482,6 +3808,128 @@ function createNodeIoView(
   };
 }
 
+function createNodeOutcomeSummary(
+  locale: Locale,
+  node: FlowNode,
+  runEvents: RunEvent[],
+  status: RunStatus
+): NonNullable<ClawFlowNodeData["outcomeSummary"]> {
+  const latestOutputEvent =
+    findLatestNodeEvent(runEvents, node.id, "node.output") ??
+    findLatestNodeEvent(runEvents, node.id, "node.completed") ??
+    findLatestNodeEvent(runEvents, node.id, "execution.step.completed");
+  const output = readRecord(latestOutputEvent?.payload?.output);
+  const hasOutput = output !== undefined;
+
+  return {
+    purposeLabel: t(locale, "nodeOutcome.purpose"),
+    purpose: createSimpleNodeSummary(locale, node),
+    resultLabel: t(locale, "nodeOutcome.latestResult"),
+    result:
+      output === undefined
+        ? status === "success"
+          ? t(locale, "nodeOutcome.outputCaptured")
+          : t(locale, "nodeOutcome.noResultYet")
+        : summarizeNodeOutput(locale, output),
+    hasOutput
+  };
+}
+
+function summarizeRunEventPayload(locale: Locale, event: RunEvent): string {
+  const output = readRecord(event.payload?.output);
+
+  if (output !== undefined) {
+    return summarizeNodeOutput(locale, output);
+  }
+
+  const input = readRecord(event.payload?.input) ?? readRecord(event.payload?.receivedInput);
+
+  if (input !== undefined) {
+    return summarizeStructuredValue(locale, input);
+  }
+
+  return event.message;
+}
+
+function summarizeNodeOutput(locale: Locale, output: Record<string, unknown>): string {
+  const prioritizedString =
+    readString(output.console) ??
+    readString(output.result) ??
+    readString(output.summary) ??
+    readString(output.taskUnderstanding) ??
+    readString(output.prompt);
+
+  if (prioritizedString !== undefined) {
+    return truncateSummary(prioritizedString);
+  }
+
+  const plan = Array.isArray(output.plan) ? output.plan.filter((item): item is string => typeof item === "string") : [];
+
+  if (plan.length > 0) {
+    return truncateSummary(plan.join(" -> "));
+  }
+
+  const upstream = readRecord(output.upstream);
+
+  if (upstream !== undefined) {
+    return summarizeStructuredValue(locale, upstream);
+  }
+
+  return t(locale, "nodeOutcome.outputCaptured");
+}
+
+function summarizeStructuredValue(locale: Locale, value: Record<string, unknown>): string {
+  const preferredString =
+    readString(value.userInput) ??
+    readString(value.prompt) ??
+    readString(value.content) ??
+    readString(value.text) ??
+    readString(value.result) ??
+    readString(value.summary);
+
+  if (preferredString !== undefined) {
+    return truncateSummary(preferredString);
+  }
+
+  const keyCount = Object.keys(value).length;
+
+  if (keyCount === 0) {
+    return t(locale, "nodeOutcome.outputCaptured");
+  }
+
+  return `${keyCount} ${t(locale, "nodeOutcome.fieldsCaptured")}`;
+}
+
+function findLatestNodeEvent(
+  runEvents: RunEvent[],
+  nodeId: string,
+  type: RunEvent["type"]
+): RunEvent | null {
+  for (let index = runEvents.length - 1; index >= 0; index -= 1) {
+    const event = runEvents[index];
+
+    if (event?.nodeId === nodeId && event.type === type) {
+      return event;
+    }
+  }
+
+  return null;
+}
+
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+}
+
+function truncateSummary(value: string): string {
+  return value.length > 120 ? `${value.slice(0, 117)}...` : value;
+}
+
 function findLatestEvent(runEvents: RunEvent[], type: RunEvent["type"]): RunEvent | null {
   for (let index = runEvents.length - 1; index >= 0; index -= 1) {
     const event = runEvents[index];
@@ -3632,6 +4080,66 @@ function getContractReadinessLabel(
   }
 
   return t(locale, "executionContract.ready");
+}
+
+function createNodePresentationLabel(
+  locale: Locale,
+  node: FlowNode,
+  experienceMode: ExperienceMode
+): string {
+  if (experienceMode !== "simple") {
+    return node.label;
+  }
+
+  const nodeType = node.type as NodeType;
+  const catalogLabel = getCatalogLabel(nodeType, "en");
+  const localizedCatalogLabel = getCatalogLabel(nodeType, locale);
+
+  if (node.label !== catalogLabel && node.label !== localizedCatalogLabel) {
+    return node.label;
+  }
+
+  return getSimpleNodePresentationLabel(locale, nodeType);
+}
+
+function getSimpleNodePresentationLabel(locale: Locale, nodeType: NodeType): string {
+  if (nodeType === "manual.trigger") {
+    return t(locale, "node.simpleStart.label");
+  }
+
+  if (nodeType === "agent.start") {
+    return t(locale, "node.simpleAgentStart.label");
+  }
+
+  if (nodeType === "agent.end") {
+    return t(locale, "node.simpleFinish.label");
+  }
+
+  if (nodeType === "output.console") {
+    return t(locale, "node.simpleOutput.label");
+  }
+
+  return t(locale, "node.simpleAgentStep.label");
+}
+
+function createSimpleNodeSummary(locale: Locale, node: FlowNode): string {
+  if (node.type === "manual.trigger") {
+    return t(locale, "node.simpleStart.summary");
+  }
+
+  if (node.type === "agent.start") {
+    return t(locale, "node.simpleAgentStart.summary");
+  }
+
+  if (node.type === "agent.end") {
+    return t(locale, "node.simpleFinish.summary");
+  }
+
+  if (node.type === "output.console") {
+    return t(locale, "node.simpleOutput.summary");
+  }
+
+  return t(locale, "node.simpleAgentStep.summary");
 }
 
 function formatCompactPorts(ports: Array<{ id: string }>): string {

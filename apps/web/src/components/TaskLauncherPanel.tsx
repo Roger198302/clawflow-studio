@@ -2,9 +2,13 @@ import { FileSpreadsheet, FileText, Workflow, X } from "lucide-react";
 import { useMemo, useState, type ChangeEvent, type ReactElement } from "react";
 import {
   TASK_TEMPLATES,
+  type BlankFlowTemplateInput,
   type ExcelReportTemplateInput,
+  type HelloWorldTemplateInput,
   type LocalFileSummaryTemplateInput,
+  type MockAgentDemoTemplateInput,
   type MultiAgentPlanningTemplateInput,
+  type ProtectedDryRunDemoTemplateInput,
   type TaskTemplateId,
   type TaskTemplateInput,
   type TaskTemplateSafetyMode
@@ -24,7 +28,19 @@ export function TaskLauncherPanel({
   onClose,
   onCreateFlow
 }: TaskLauncherPanelProps): ReactElement {
-  const [selectedTemplateId, setSelectedTemplateId] = useState<TaskTemplateId>("excel-report");
+  const [selectedTemplateId, setSelectedTemplateId] = useState<TaskTemplateId>("hello-world");
+  const [helloInput] = useState<HelloWorldTemplateInput>({
+    templateId: "hello-world"
+  });
+  const [mockDemoInput] = useState<MockAgentDemoTemplateInput>({
+    templateId: "mock-agent-demo"
+  });
+  const [protectedDemoInput] = useState<ProtectedDryRunDemoTemplateInput>({
+    templateId: "protected-dry-run-demo"
+  });
+  const [blankFlowInput] = useState<BlankFlowTemplateInput>({
+    templateId: "blank-flow"
+  });
   const [excelInput, setExcelInput] = useState<ExcelReportTemplateInput>({
     templateId: "excel-report",
     taskName: "Excel Report Task",
@@ -55,6 +71,26 @@ export function TaskLauncherPanel({
   );
 
   const handleCreateFlow = (): void => {
+    if (selectedTemplateId === "hello-world") {
+      onCreateFlow(helloInput);
+      return;
+    }
+
+    if (selectedTemplateId === "mock-agent-demo") {
+      onCreateFlow(mockDemoInput);
+      return;
+    }
+
+    if (selectedTemplateId === "protected-dry-run-demo") {
+      onCreateFlow(protectedDemoInput);
+      return;
+    }
+
+    if (selectedTemplateId === "blank-flow") {
+      onCreateFlow(blankFlowInput);
+      return;
+    }
+
     if (selectedTemplateId === "excel-report") {
       onCreateFlow(excelInput);
       return;
@@ -93,7 +129,12 @@ export function TaskLauncherPanel({
             <button
               key={template.id}
               type="button"
-              className={template.id === selectedTemplateId ? "is-selected" : undefined}
+              className={[
+                template.id === selectedTemplateId ? "is-selected" : "",
+                template.id === "hello-world" ? "is-featured" : ""
+              ]
+                .filter(Boolean)
+                .join(" ")}
               data-testid={`task-template-${template.id}`}
               onClick={() => setSelectedTemplateId(template.id)}
             >
@@ -107,6 +148,13 @@ export function TaskLauncherPanel({
               <span>
                 <strong>{t(locale, template.titleKey)}</strong>
                 <small>{t(locale, template.descriptionKey)}</small>
+                {template.badgeKeys !== undefined ? (
+                  <span className="task-template-badges">
+                    {template.badgeKeys.map((badgeKey) => (
+                      <b key={badgeKey}>{t(locale, badgeKey)}</b>
+                    ))}
+                  </span>
+                ) : null}
               </span>
               <em>{template.nodeCount}</em>
             </button>
@@ -136,6 +184,28 @@ export function TaskLauncherPanel({
         </section>
 
         <section className="task-template-form" data-testid="task-template-form">
+          {selectedTemplateId === "hello-world" ? <HelloWorldTemplateForm locale={locale} /> : null}
+          {selectedTemplateId === "mock-agent-demo" ? (
+            <SimpleTemplateForm
+              locale={locale}
+              messageKey="taskLauncher.template.mockDemo.outputs"
+              showGateway
+            />
+          ) : null}
+          {selectedTemplateId === "protected-dry-run-demo" ? (
+            <SimpleTemplateForm
+              locale={locale}
+              messageKey="taskLauncher.template.protectedDemo.outputs"
+              showGateway
+            />
+          ) : null}
+          {selectedTemplateId === "blank-flow" ? (
+            <SimpleTemplateForm
+              locale={locale}
+              messageKey="taskLauncher.template.blank.outputs"
+              showGateway={false}
+            />
+          ) : null}
           {selectedTemplateId === "excel-report" ? (
             <ExcelTemplateForm
               locale={locale}
@@ -167,6 +237,38 @@ export function TaskLauncherPanel({
         </button>
       </footer>
     </aside>
+  );
+}
+
+function SimpleTemplateForm({
+  locale,
+  messageKey,
+  showGateway
+}: {
+  locale: Locale;
+  messageKey: Parameters<typeof t>[1];
+  showGateway: boolean;
+}): ReactElement {
+  return (
+    <>
+      <div className="task-form-readonly" data-testid="task-simple-template-copy">
+        <strong>{t(locale, "taskLauncher.manualOnly")}</strong>
+        <span>{t(locale, messageKey)}</span>
+      </div>
+      {showGateway ? <ReadOnlyGatewayField locale={locale} /> : null}
+    </>
+  );
+}
+
+function HelloWorldTemplateForm({ locale }: { locale: Locale }): ReactElement {
+  return (
+    <>
+      <div className="task-form-readonly" data-testid="task-hello-world-copy">
+        <strong>{t(locale, "taskLauncher.helloPrompt")}</strong>
+        <span>{t(locale, "taskLauncher.helloOutput")}</span>
+      </div>
+      <ReadOnlyGatewayField locale={locale} />
+    </>
   );
 }
 
@@ -412,6 +514,22 @@ function createSafetyModeLabelKey(mode: TaskTemplateSafetyMode):
 }
 
 function createRequiredInputSummary(locale: Locale, templateId: TaskTemplateId): string {
+  if (templateId === "hello-world") {
+    return t(locale, "taskLauncher.template.hello.inputs");
+  }
+
+  if (templateId === "mock-agent-demo") {
+    return t(locale, "taskLauncher.template.mockDemo.inputs");
+  }
+
+  if (templateId === "protected-dry-run-demo") {
+    return t(locale, "taskLauncher.template.protectedDemo.inputs");
+  }
+
+  if (templateId === "blank-flow") {
+    return t(locale, "taskLauncher.template.blank.inputs");
+  }
+
   if (templateId === "excel-report") {
     return t(locale, "taskLauncher.template.excel.inputs");
   }

@@ -70,6 +70,7 @@ export interface EditableNodePatch {
   harnessRef?: NodeHarnessRef | null;
   thinkingLevel?: BudgetPolicy["thinking"];
   riskLevel?: RiskPolicy["level"];
+  data?: FlowNode["data"];
 }
 
 export interface EditableEdgeConnection {
@@ -109,7 +110,7 @@ export interface FlowStoreState {
   runReadinessError: string | null;
   livePlanStepStatuses: Record<string, ExecutionPlanStepStatus>;
   selectNode: (nodeId: string | null) => void;
-  addNode: (type: NodeType, position?: FlowNode["position"]) => void;
+  addNode: (type: NodeType, position?: FlowNode["position"], label?: string) => void;
   duplicateNode: (nodeId: string) => void;
   removeNode: (nodeId: string) => void;
   addEdge: (connection: EditableEdgeConnection) => void;
@@ -552,12 +553,13 @@ export const useFlowStore = create<FlowStoreState>((set) => ({
   selectNode: (nodeId) => {
     set({ selectedNodeId: nodeId });
   },
-  addNode: (type, position) => {
+  addNode: (type, position, label) => {
     set((state) => {
       const newNode = createFlowNode(
         type,
         createNodeId(type, state.flow.nodes),
-        position ?? createAddPosition(state.flow.nodes)
+        position ?? createAddPosition(state.flow.nodes),
+        label
       );
 
       return {
@@ -707,7 +709,8 @@ export const useFlowStore = create<FlowStoreState>((set) => ({
                 : {
                     ...node.riskPolicy,
                     level: patch.riskLevel
-                  }
+                  },
+            data: patch.data ?? node.data
           };
 
           if (patch.harnessRef !== undefined) {

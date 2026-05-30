@@ -2,7 +2,14 @@ import type { FlowEdge, FlowNode, FlowSpec, NodeType } from "@clawflow/protocol"
 import { createFlowNode } from "./flowCatalog";
 import type { I18nKey } from "./i18n";
 
-export type TaskTemplateId = "excel-report" | "local-file-summary" | "multi-agent-planning";
+export type TaskTemplateId =
+  | "hello-world"
+  | "mock-agent-demo"
+  | "protected-dry-run-demo"
+  | "blank-flow"
+  | "excel-report"
+  | "local-file-summary"
+  | "multi-agent-planning";
 export type TaskTemplateSafetyMode = "plan-only" | "read-only" | "controlled-write";
 
 export interface TaskTemplateDefinition {
@@ -11,7 +18,24 @@ export interface TaskTemplateDefinition {
   descriptionKey: I18nKey;
   expectedOutputsKey: I18nKey;
   generatedAgentsKey: I18nKey;
+  badgeKeys?: I18nKey[];
   nodeCount: number;
+}
+
+export interface HelloWorldTemplateInput {
+  templateId: "hello-world";
+}
+
+export interface MockAgentDemoTemplateInput {
+  templateId: "mock-agent-demo";
+}
+
+export interface ProtectedDryRunDemoTemplateInput {
+  templateId: "protected-dry-run-demo";
+}
+
+export interface BlankFlowTemplateInput {
+  templateId: "blank-flow";
 }
 
 export interface ExcelReportTemplateInput {
@@ -42,6 +66,10 @@ export interface MultiAgentPlanningTemplateInput {
 }
 
 export type TaskTemplateInput =
+  | HelloWorldTemplateInput
+  | MockAgentDemoTemplateInput
+  | ProtectedDryRunDemoTemplateInput
+  | BlankFlowTemplateInput
   | ExcelReportTemplateInput
   | LocalFileSummaryTemplateInput
   | MultiAgentPlanningTemplateInput;
@@ -57,6 +85,46 @@ export interface TaskTemplateMetadata {
 }
 
 export const TASK_TEMPLATES: TaskTemplateDefinition[] = [
+  {
+    id: "hello-world",
+    titleKey: "taskLauncher.template.hello.title",
+    descriptionKey: "taskLauncher.template.hello.description",
+    expectedOutputsKey: "taskLauncher.template.hello.outputs",
+    generatedAgentsKey: "taskLauncher.template.hello.agents",
+    badgeKeys: [
+      "taskLauncher.badge.recommended",
+      "taskLauncher.badge.easiest",
+      "taskLauncher.badge.mockSafe",
+      "taskLauncher.badge.oneMinute"
+    ],
+    nodeCount: 3
+  },
+  {
+    id: "mock-agent-demo",
+    titleKey: "taskLauncher.template.mockDemo.title",
+    descriptionKey: "taskLauncher.template.mockDemo.description",
+    expectedOutputsKey: "taskLauncher.template.mockDemo.outputs",
+    generatedAgentsKey: "taskLauncher.template.mockDemo.agents",
+    badgeKeys: ["taskLauncher.badge.mockSafe"],
+    nodeCount: 5
+  },
+  {
+    id: "protected-dry-run-demo",
+    titleKey: "taskLauncher.template.protectedDemo.title",
+    descriptionKey: "taskLauncher.template.protectedDemo.description",
+    expectedOutputsKey: "taskLauncher.template.protectedDemo.outputs",
+    generatedAgentsKey: "taskLauncher.template.protectedDemo.agents",
+    badgeKeys: ["taskLauncher.badge.protected"],
+    nodeCount: 5
+  },
+  {
+    id: "blank-flow",
+    titleKey: "taskLauncher.template.blank.title",
+    descriptionKey: "taskLauncher.template.blank.description",
+    expectedOutputsKey: "taskLauncher.template.blank.outputs",
+    generatedAgentsKey: "taskLauncher.template.blank.agents",
+    nodeCount: 0
+  },
   {
     id: "excel-report",
     titleKey: "taskLauncher.template.excel.title",
@@ -84,6 +152,22 @@ export const TASK_TEMPLATES: TaskTemplateDefinition[] = [
 ];
 
 export function createFlowFromTaskTemplate(input: TaskTemplateInput): FlowSpec {
+  if (input.templateId === "hello-world") {
+    return createHelloWorldFlow();
+  }
+
+  if (input.templateId === "mock-agent-demo") {
+    return createMockAgentDemoFlow();
+  }
+
+  if (input.templateId === "protected-dry-run-demo") {
+    return createProtectedDryRunDemoFlow();
+  }
+
+  if (input.templateId === "blank-flow") {
+    return createBlankFlow();
+  }
+
   if (input.templateId === "excel-report") {
     return createExcelReportFlow(input);
   }
@@ -93,6 +177,164 @@ export function createFlowFromTaskTemplate(input: TaskTemplateInput): FlowSpec {
   }
 
   return createMultiAgentPlanningFlow(input);
+}
+
+function createHelloWorldFlow(): FlowSpec {
+  const metadata = createTemplateMetadata(
+    "hello-world",
+    "Hello World Agent Flow",
+    "read-only",
+    {
+      prompt: "Say hello from Clawflow Studio.",
+      mockOutput: "Hello from Clawflow Studio mock agent."
+    },
+    ["Hello from Clawflow Studio mock agent."]
+  );
+  const nodes = createLinearTemplateNodes(
+    metadata,
+    [
+      {
+        id: "template.hello.manual",
+        type: "manual.trigger",
+        label: "Hello World Trigger",
+        objective: "Say hello from Clawflow Studio.",
+        runtimeRef: "mock-local"
+      },
+      {
+        id: "template.hello.worker",
+        type: "agent.worker",
+        label: "Hello World Agent",
+        objective: "Return: Hello from Clawflow Studio mock agent.",
+        runtimeRef: "mock-local"
+      },
+      {
+        id: "template.hello.output",
+        type: "output.console",
+        label: "Console Output",
+        objective: "Display the Hello World mock output and next step.",
+        runtimeRef: "mock-local"
+      }
+    ]
+  );
+
+  return createTemplateFlow("flow.template.hello-world", "Hello World Agent Flow", metadata, nodes);
+}
+
+function createMockAgentDemoFlow(): FlowSpec {
+  const metadata = createTemplateMetadata(
+    "mock-agent-demo",
+    "Mock Agent Demo",
+    "read-only",
+    {
+      prompt: "Run the safe mock Agent demo."
+    },
+    ["Mock flow completed."]
+  );
+  const nodes = createLinearTemplateNodes(metadata, [
+    {
+      id: "template.mock.manual",
+      type: "manual.trigger",
+      label: "Manual Trigger",
+      objective: "Start the safe mock Agent demo.",
+      runtimeRef: "mock-local"
+    },
+    {
+      id: "template.mock.start",
+      type: "agent.start",
+      label: "Start Agent",
+      objective: "Prepare the sequential mock workflow.",
+      runtimeRef: "mock-local"
+    },
+    {
+      id: "template.mock.worker",
+      type: "agent.worker",
+      label: "Worker Agent",
+      objective: "Complete the mock worker step.",
+      runtimeRef: "mock-local"
+    },
+    {
+      id: "template.mock.end",
+      type: "agent.end",
+      label: "End Agent",
+      objective: "Summarize the safe mock run.",
+      runtimeRef: "mock-local"
+    },
+    {
+      id: "template.mock.output",
+      type: "output.console",
+      label: "Console Output",
+      objective: "Show mock run completion details.",
+      runtimeRef: "mock-local"
+    }
+  ]);
+
+  return createTemplateFlow("flow.template.mock-agent-demo", "Mock Agent Demo", metadata, nodes);
+}
+
+function createProtectedDryRunDemoFlow(): FlowSpec {
+  const metadata = createTemplateMetadata(
+    "protected-dry-run-demo",
+    "Protected Dry Run Demo",
+    "plan-only",
+    {
+      prompt: "Verify protected dry-run boundaries for openclaw-local."
+    },
+    ["Protected dry-run metadata only."]
+  );
+  const nodes = createLinearTemplateNodes(metadata, [
+    {
+      id: "template.protected.manual",
+      type: "manual.trigger",
+      label: "Protected Trigger",
+      objective: "Start a protected dry-run verification flow.",
+      runtimeRef: "mock-local"
+    },
+    {
+      id: "template.protected.start",
+      type: "agent.start",
+      label: "Protected Start Agent",
+      objective: "Explain that local OpenClaw reachability is not execution permission.",
+      runtimeRef: "openclaw-local"
+    },
+    {
+      id: "template.protected.worker",
+      type: "agent.worker",
+      label: "Protected Worker Agent",
+      objective: "Produce protected dry-run metadata without real OpenClaw execution.",
+      runtimeRef: "openclaw-local"
+    },
+    {
+      id: "template.protected.end",
+      type: "agent.end",
+      label: "Protected Review Agent",
+      objective: "Confirm that real execution remains blocked.",
+      runtimeRef: "openclaw-local"
+    },
+    {
+      id: "template.protected.output",
+      type: "output.console",
+      label: "Console Output",
+      objective: "Show protected dry-run warnings and manual next steps.",
+      runtimeRef: "mock-local"
+    }
+  ]);
+
+  return createTemplateFlow("flow.template.protected-dry-run-demo", "Protected Dry Run Demo", metadata, nodes);
+}
+
+function createBlankFlow(): FlowSpec {
+  const now = new Date().toISOString();
+
+  return {
+    schemaVersion: "0.1",
+    id: "flow.template.blank",
+    name: "Blank Flow",
+    description: "Blank canvas generated from Task Launcher. No execution is triggered.",
+    createdAt: now,
+    updatedAt: now,
+    nodes: [],
+    edges: []
+  };
 }
 
 function createExcelReportFlow(input: ExcelReportTemplateInput): FlowSpec {
@@ -287,14 +529,20 @@ function createMultiAgentPlanningFlow(input: MultiAgentPlanningTemplateInput): F
 
 function createLinearTemplateNodes(
   metadata: TaskTemplateMetadata,
-  specs: Array<{ id: string; type: NodeType; label: string; objective: string }>
+  specs: Array<{
+    id: string;
+    type: NodeType;
+    label: string;
+    objective: string;
+    runtimeRef?: FlowNode["runtimeRef"];
+  }>
 ): FlowNode[] {
   return specs.map((spec, index) => {
     const node = createFlowNode(spec.type, spec.id, { x: 80 + index * 270, y: 120 }, spec.label);
 
     return {
       ...node,
-      runtimeRef: spec.type.startsWith("agent.") ? "openclaw-local" : node.runtimeRef,
+      runtimeRef: spec.runtimeRef ?? (spec.type.startsWith("agent.") ? "openclaw-local" : node.runtimeRef),
       data: {
         ...(node.data ?? {}),
         template: metadata,

@@ -7,9 +7,11 @@ interface DemoGuidePanelProps {
   onClose: () => void;
   onOpenRuntimeManager: () => void;
   onResetDemoFlow: () => void;
+  onStartHelloWorld: () => void;
 }
 
 const demoPathKeys: I18nKey[] = [
+  "demoGuide.path.helloWorld",
   "demoGuide.path.builder",
   "demoGuide.path.inspectFlow",
   "demoGuide.path.readiness",
@@ -48,7 +50,8 @@ export function DemoGuidePanel({
   locale,
   onClose,
   onOpenRuntimeManager,
-  onResetDemoFlow
+  onResetDemoFlow,
+  onStartHelloWorld
 }: DemoGuidePanelProps): ReactElement {
   return (
     <aside className="demo-guide-panel" aria-label={t(locale, "demoGuide.title")} data-testid="demo-guide-panel">
@@ -69,6 +72,14 @@ export function DemoGuidePanel({
         <section className="demo-guide-card">
           <h2>{t(locale, "demoGuide.whatTitle")}</h2>
           <p>{t(locale, "demoGuide.whatBody")}</p>
+        </section>
+
+        <section className="demo-guide-card" data-testid="demo-guide-quick-test">
+          <h2>{t(locale, "demoGuide.quickTestTitle")}</h2>
+          <p>{t(locale, "demoGuide.quickTestBody")}</p>
+          <button type="button" data-testid="start-hello-world-button" onClick={onStartHelloWorld}>
+            {t(locale, "taskLauncher.startHelloWorld")}
+          </button>
         </section>
 
         <section className="demo-guide-card" data-testid="demo-guide-path">

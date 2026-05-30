@@ -11,6 +11,8 @@ export interface ClawFlowNodeData extends Record<string, unknown> {
   label: string;
   nodeType: string;
   displayMode: EffectiveNodeDisplayMode;
+  isSimpleExperience: boolean;
+  simpleSummary: string;
   role: NodeRole;
   roleLabel: string;
   runtimeRef: string;
@@ -23,6 +25,7 @@ export interface ClawFlowNodeData extends Record<string, unknown> {
   planSummary?: NodeLinearPlanBadgeSummary;
   estimateSummary?: NodeResourceEstimateBadgeSummary;
   gatewaySummary?: NodeGatewayBadgeSummary;
+  outcomeSummary?: NodeRunOutcomeSummary;
   companion?: NodeCompanionPresentation;
 }
 
@@ -79,6 +82,14 @@ export interface NodeGatewayBadgeSummary {
   hasWarning: boolean;
 }
 
+export interface NodeRunOutcomeSummary {
+  purposeLabel: string;
+  purpose: string;
+  resultLabel: string;
+  result: string;
+  hasOutput: boolean;
+}
+
 type ClawFlowCanvasNode = Node<ClawFlowNodeData, "clawflowNode">;
 
 function canReceiveInput(role: NodeRole): boolean {
@@ -95,6 +106,9 @@ export function ClawFlowNode({ data, selected }: NodeProps<ClawFlowCanvasNode>):
   const isDetailedMode = data.displayMode === "detailed";
   const isTraceMode = data.displayMode === "trace";
   const issueCount = data.contractSummary?.issueCount ?? 0;
+  const shouldShowOutcome =
+    data.outcomeSummary !== undefined &&
+    (data.outcomeSummary.hasOutput || isDetailedMode || data.status === "success" || data.status === "failed");
 
   return (
     <div
@@ -121,8 +135,10 @@ export function ClawFlowNode({ data, selected }: NodeProps<ClawFlowCanvasNode>):
 
       {isCompactMode ? (
         <div className="node-compact-meta" data-testid={`${data.testId}-compact-meta`}>
-          <span title={data.nodeType}>{data.nodeType}</span>
-          <span>{data.role}</span>
+          <span title={data.isSimpleExperience ? data.simpleSummary : data.nodeType}>
+            {data.isSimpleExperience ? data.simpleSummary : data.nodeType}
+          </span>
+          <span>{data.isSimpleExperience ? data.status : data.role}</span>
           {issueCount > 0 ? <strong>{issueCount}</strong> : null}
         </div>
       ) : null}
@@ -174,6 +190,22 @@ export function ClawFlowNode({ data, selected }: NodeProps<ClawFlowCanvasNode>):
           <span>{data.contractSummary.outputSummary}</span>
           <span className="node-contract-readiness">{data.contractSummary.readinessLabel}</span>
           {data.contractSummary.issueCount > 0 ? <strong>{data.contractSummary.issueCount}</strong> : null}
+        </div>
+      ) : null}
+
+      {shouldShowOutcome && data.outcomeSummary !== undefined ? (
+        <div
+          className={`node-outcome-card ${data.outcomeSummary.hasOutput ? "has-output" : "is-empty"}`}
+          data-testid={`${data.testId}-outcome`}
+        >
+          <div>
+            <span>{data.outcomeSummary.purposeLabel}</span>
+            <strong title={data.outcomeSummary.purpose}>{data.outcomeSummary.purpose}</strong>
+          </div>
+          <div>
+            <span>{data.outcomeSummary.resultLabel}</span>
+            <strong title={data.outcomeSummary.result}>{data.outcomeSummary.result}</strong>
+          </div>
         </div>
       ) : null}
 
