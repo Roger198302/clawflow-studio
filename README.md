@@ -51,6 +51,8 @@ Beta testers should use the private beta materials:
 
 Do not use this beta for production work, secrets, credentials, sensitive files, or real external agent/tool execution.
 
+For the fastest first-run sanity check, open **Templates** and choose **Hello World Agent Flow**. It creates a three-node `mock-local` flow and does not call OpenClaw, Hermes, Shell, Browser, filesystem, MCP, RAG, ComfyUI, or external APIs.
+
 Keep the repository, beta links, screenshots, recordings, logs, and feedback private to invited testers. Do not publish packages, images, releases, websites, public announcements, or public mirrors from this beta.
 
 ## Workspace
