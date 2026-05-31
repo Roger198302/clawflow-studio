@@ -66,6 +66,18 @@ Open the Runtime Manager and verify:
 - `hermes-local` is unavailable;
 - unavailable runtimes are clearly labeled and should not execute.
 
+## Run Hello World First
+
+Use Hello World as the fastest sanity check:
+
+1. Click Templates.
+2. Choose **Hello World Agent Flow**.
+3. Confirm the canvas shows Manual Trigger -> Hello World Agent -> Console Output.
+4. Click `Run`.
+5. Confirm the run reaches success in Run Inspector.
+
+Expected: safe `mock-local` output only. This path does not call OpenClaw, Hermes, Shell, filesystem, browser automation, or external APIs.
+
 ## Inspect Run Readiness
 
 Look near the Run controls for the advisory pre-run status.

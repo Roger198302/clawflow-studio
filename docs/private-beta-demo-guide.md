@@ -51,21 +51,25 @@ pnpm test:e2e
 
 ## Recommended Five-Minute Demo
 
-1. Start with the Builder preset.
-2. Inspect the default five-node flow: Manual Trigger, Start Agent, Worker Agent, End Agent, Console Output.
-3. Check Run Readiness, Contract Preview, Linear Execution Plan, and Resource Estimate.
-4. Click Run with the default `mock-local` runtime.
-5. Switch to the Runner preset and inspect Session Console plus Run Inspector.
-6. Try Focus / Presenter layout for a canvas-first view.
-7. Try Debug / Reviewer layout for richer contract and inspector context.
-8. Try Node Display modes: Auto, Compact, Standard, Detailed, Trace.
-9. Right-click the canvas and nodes to try context menu editing actions.
-10. Select `openclaw-local` for an agent node and confirm protected dry-run behavior.
-11. Select `hermes-local` for an agent node and confirm unavailable-runtime rejection.
+1. Click Templates and choose **Hello World Agent Flow**.
+2. Confirm it creates Manual Trigger -> Hello World Agent -> Console Output.
+3. Click Run with the default `mock-local` runtime.
+4. Confirm the run reaches success and inspect Run Inspector.
+5. Reset Demo Flow or choose Mock Agent Demo to inspect the default five-node flow: Manual Trigger, Start Agent, Worker Agent, End Agent, Console Output.
+6. Check Run Readiness, Contract Preview, Linear Execution Plan, and Resource Estimate.
+7. Switch to the Runner preset and inspect Session Console plus Run Inspector.
+8. Try Focus / Presenter layout for a canvas-first view.
+9. Try Debug / Reviewer layout for richer contract and inspector context.
+10. Try Node Display modes: Auto, Compact, Standard, Detailed, Trace.
+11. Right-click the canvas and nodes to try context menu editing actions.
+12. Select `openclaw-local` for an agent node and confirm protected dry-run behavior.
+13. Select `hermes-local` for an agent node and confirm unavailable-runtime rejection.
+
+Hello World is the fastest sanity check. It uses safe mock execution and does not call OpenClaw, Hermes, Shell, filesystem, browser automation, or external APIs.
 
 ## In-App Guide
 
-Use the top-bar Guide button for a compact in-app demo path, panel map, beta limitations, Runtime Manager shortcut, and Reset Demo Flow action.
+Use the top-bar Guide button for a compact in-app demo path, Hello World quick test, panel map, beta limitations, Runtime Manager shortcut, and Reset Demo Flow action.
 
 Reset Demo Flow restores the default five-node graph and clears local run/event UI state. It does not change backend state or saved repository files.
 

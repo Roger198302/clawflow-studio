@@ -83,6 +83,13 @@ Expected: the WebUI loads and the gateway health endpoint returns a healthy resp
 
 ## Core Workspace Checks
 
+- Open Templates and confirm **Hello World Agent Flow** appears first.
+- Apply Hello World and confirm it creates:
+  - Manual Trigger
+  - Hello World Agent
+  - Console Output
+- Confirm Hello World uses safe `mock-local` execution only.
+- Confirm no OpenClaw, Hermes, Shell, filesystem, browser, or external API execution is triggered by creating the template.
 - Default five nodes are visible:
   - Manual Trigger
   - Start Agent
@@ -97,12 +104,13 @@ Expected: the WebUI loads and the gateway health endpoint returns a healthy resp
 
 ## Mock Runtime Flow
 
-1. Keep all executable nodes on `mock-local`.
-2. Click `Run`.
-3. Confirm the run reaches success.
-4. Confirm Run Inspector receives RunEvents.
-5. Confirm node status badges update.
-6. Confirm Session Console can record session-bound run activity if using a Session.
+1. Start with Hello World Agent Flow for the fastest sanity check.
+2. Keep all executable nodes on `mock-local`.
+3. Click `Run`.
+4. Confirm the run reaches success.
+5. Confirm Run Inspector receives RunEvents.
+6. Confirm node status badges update.
+7. Confirm Session Console can record session-bound run activity if using a Session.
 
 Expected: mock execution succeeds locally with structured mock output only.
 

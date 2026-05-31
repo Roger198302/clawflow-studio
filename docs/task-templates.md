@@ -23,13 +23,59 @@ Phase 6J adds a protected Task Launcher for generating preconfigured Agent flows
 2. Open `http://localhost:5173`.
 3. Optional: connect the Workspace Default Gateway from the Node Library Gateway card.
 4. Click **Templates** in the top bar.
-5. Choose a template.
+5. Choose a template. Start with **Hello World Agent Flow** for the fastest first-run check.
 6. Fill the required fields.
 7. Click **Create Flow** and confirm replacement of the current canvas flow.
 8. Inspect the generated nodes, Run Readiness, Linear Execution Plan, and Contract Preview.
 9. Open Runtime Manager and export the manual OpenClaw task payload.
 
 ## Templates
+
+### Hello World Agent Flow
+
+Purpose: load the smallest possible safe Agent workflow.
+
+Inputs:
+
+- No setup required
+
+Generated flow:
+
+- Manual Trigger
+- Hello World Agent
+- Console Output
+
+Default prompt: `Say hello from Clawflow Studio.`
+
+Expected mock output intent: `Hello from Clawflow Studio mock agent.`
+
+This template uses `mock-local` only. It does not call OpenClaw, Hermes, Shell, Browser, filesystem, MCP, RAG, ComfyUI, provider APIs, or `/api/runs` during template creation.
+
+### Mock Agent Demo
+
+Purpose: load the safe five-node mock workflow.
+
+Generated flow:
+
+- Manual Trigger
+- Start Agent
+- Worker Agent
+- End Agent
+- Console Output
+
+All nodes use `mock-local`.
+
+### Protected Dry Run Demo
+
+Purpose: load a five-node workflow that demonstrates protected `openclaw-local` dry-run metadata.
+
+Agent nodes use `openclaw-local`, but Clawflow Studio still blocks real execution. This is for inspecting protected boundary copy and manual export metadata only.
+
+### Blank Flow
+
+Purpose: start from an empty canvas for manual building.
+
+Blank Flow creates no nodes and no edges. It is expected to show preflight diagnostics until the user builds a valid graph.
 
 ### Excel To Word / Markdown / Summary
 

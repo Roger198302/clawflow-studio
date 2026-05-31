@@ -101,6 +101,10 @@ Recommended template workflow:
 1. Optional: connect the Workspace Default Gateway from the Node Library Gateway card.
 2. Click **Templates** in the top bar.
 3. Choose a task template:
+   - Hello World Agent Flow
+   - Mock Agent Demo
+   - Protected Dry Run Demo
+   - Blank Flow
    - Excel to Word / Markdown / Summary
    - Local File Summary
    - Multi-Agent Planning
@@ -110,6 +114,8 @@ Recommended template workflow:
 7. Open Runtime Manager and export the manual OpenClaw task payload.
 
 Template-generated flows are still protected. Clawflow Studio does not read local files, write reports, call OpenClaw execution endpoints, or call `/api/runs` during template creation or export. The manual export payload includes template metadata, selected user inputs, expected outputs, workspace gateway metadata, and per-Agent gateway bindings for review.
+
+For first-run sanity checks, use **Hello World Agent Flow** first. It creates only Manual Trigger -> Hello World Agent -> Console Output, uses `mock-local`, and keeps the Run action explicit.
 
 More detail: [Task Launcher And Template Gallery](task-templates.md).
 

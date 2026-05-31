@@ -15,6 +15,7 @@ test.beforeEach(async ({ page }) => {
       window.localStorage.setItem("clawflow.workspaceViewMode", "default");
       window.localStorage.setItem("clawflow.nodeDisplayMode", "auto");
       window.localStorage.setItem("clawflow.workspacePreset", "custom");
+      window.localStorage.setItem("clawflow.experienceMode", "simple");
       window.localStorage.setItem(
         "clawflow.localGatewayConnection",
         JSON.stringify({
@@ -52,7 +53,7 @@ test.beforeEach(async ({ page }) => {
   await page.goto("/");
   await expect(page.getByTestId("clawflow-canvas")).toBeVisible();
   await expect(page.getByTestId(NODE_IDS.manual)).toBeVisible();
-  await expect(page.getByTestId("linear-plan-status")).toContainText("Ready");
+  await expect(page.getByTestId("run-readiness-preview")).toBeVisible();
 });
 
 test("app loads with default workspace nodes and no fatal console errors", async ({ page }) => {
@@ -73,13 +74,9 @@ test("app loads with default workspace nodes and no fatal console errors", async
   for (const nodeId of Object.values(NODE_IDS)) {
     await expect(page.getByTestId(nodeId)).toBeVisible();
   }
-  await expect(page.getByTestId("execution-contract-preview-panel")).toBeVisible();
-  await expect(page.getByTestId("execution-contract-preview-panel")).toContainText("Catalog contract");
-  await expect(page.getByTestId("execution-contract-preview-panel")).toContainText("Required inputs");
-  await expect(page.getByTestId("execution-contract-preview-panel")).toContainText("Outputs");
-  await expect(page.getByTestId("linear-execution-plan-panel")).toBeVisible();
-  await expect(page.getByTestId("resource-estimate-panel")).toBeVisible();
-  await expect(page.getByTestId("resource-estimate-panel")).toContainText("Tokens");
+  await expect(page.getByTestId("execution-contract-preview-panel")).toBeHidden();
+  await expect(page.getByTestId("linear-execution-plan-panel")).toBeHidden();
+  await expect(page.getByTestId("resource-estimate-panel")).toBeHidden();
   await expect(page.getByTestId("run-readiness-preview")).toBeVisible();
   await expect(page.getByTestId("run-readiness-status")).toContainText("Ready with warnings");
   await expect(page.getByTestId("pre-run-summary")).toContainText(/Pre-run · \d+ warn/);
@@ -87,15 +84,27 @@ test("app loads with default workspace nodes and no fatal console errors", async
   await expectRunButtonInExecutionStrip(page);
   await expect(page.getByTestId("node-display-mode-select")).toHaveValue("auto");
   await expect(page.getByTestId("node-display-mode-control")).toContainText("Node:");
+  await expect(page.getByTestId("experience-mode-select")).toHaveValue("simple");
+  await expect(page.getByTestId("experience-mode-control")).toContainText("Mode:");
   await expect(page.getByTestId("workspace-preset-select")).toHaveValue("custom");
   await expect(page.getByTestId("workspace-preset-control")).toContainText("Preset:");
-  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "standard");
+  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "compact");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-compact-meta`)).toContainText("Does one task");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-compact-meta`)).not.toContainText("agent.worker");
   await expect(page.getByTestId("save-flow-button")).toBeVisible();
   await expect(page.getByTestId("export-json-button")).toBeVisible();
   await expect(page.getByTestId("runtime-manager-button")).toBeVisible();
   await expect(page.getByTestId("task-launcher-button")).toBeVisible();
   await expect(page.getByTestId("demo-guide-button")).toBeVisible();
   await expect(page.getByTestId("reset-layout-button")).toBeVisible();
+  await expect(page.getByTestId("beginner-start-card")).toBeVisible();
+  await expect(page.getByTestId("beginner-start-card")).toContainText("Start here");
+  await expect(page.getByTestId("node-library-summary")).toContainText("3 quick nodes");
+  await expect(page.getByTestId("simple-node-library-note")).toContainText(
+    "Start -> Agent Step -> Output"
+  );
+  await expect(page.getByTestId("node-library-content")).toContainText("Agent Step");
+  await expect(page.getByTestId("node-library-item-agent-start")).toHaveCount(0);
   await expect(page.getByTestId("node-library-content")).toBeVisible();
   await expect(page.getByTestId("session-console-panel")).toBeVisible();
   await expect(page.getByTestId("run-inspector")).toBeVisible();
@@ -122,6 +131,7 @@ test("workspace header remains usable across common desktop widths", async ({ pa
     await expect(page.getByTestId("pre-run-summary")).toBeVisible();
     await expect(page.getByTestId("execution-action-strip")).toBeVisible();
     await expect(page.getByTestId("workspace-preset-control")).toBeVisible();
+    await expect(page.getByTestId("experience-mode-control")).toBeVisible();
     await expect(page.getByTestId("node-display-mode-control")).toBeVisible();
     await expect(page.getByTestId("save-flow-button")).toBeVisible();
     await expect(page.getByTestId("export-json-button")).toBeVisible();
@@ -141,6 +151,7 @@ test("workspace header remains usable across common desktop widths", async ({ pa
       "top-status",
       "execution-action-strip",
       "run-readiness-preview",
+      "experience-mode-control",
       "workspace-preset-control",
       "view-mode-control",
       "node-display-mode-control",
@@ -154,9 +165,7 @@ test("workspace header remains usable across common desktop widths", async ({ pa
 
     for (const testId of headerItemTestIds) {
       const item = page.getByTestId(testId);
-      await item.evaluate((element) =>
-        element.scrollIntoView({ block: "nearest", inline: "center" })
-      );
+      await scrollTopBarControlIntoView(item);
       await expect(item).toBeVisible();
       await expectInsideContainerViewport(item, header);
     }
@@ -176,6 +185,88 @@ test("workspace header remains usable across common desktop widths", async ({ pa
   }
 });
 
+test("beginner mode keeps first-run actions obvious and advanced mode exposes details", async ({ page }) => {
+  let runRequests = 0;
+
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/runs") {
+      runRequests += 1;
+    }
+  });
+
+  await page.route("**/api/runtimes/openclaw-local/probe", async (route) => {
+    const checkedAt = new Date().toISOString();
+
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        runtimeId: "openclaw-local",
+        health: {
+          runtimeId: "openclaw-local",
+          status: "online",
+          checkedAt,
+          latencyMs: 2,
+          message:
+            "OpenClaw local gateway is reachable. Real Agent and Tool execution remains blocked."
+        },
+        connection: {
+          baseUrl: "http://localhost:25311",
+          healthPath: "/health",
+          healthUrl: "http://localhost:25311/health",
+          status: "connected",
+          protected: true,
+          checkedAt
+        }
+      })
+    });
+  });
+
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-experience-mode", "simple");
+  await expect(page.getByTestId("beginner-start-card")).toContainText("Hello World");
+  await expect(page.getByTestId("beginner-start-card")).toContainText("Connect Gateway");
+  await expect(page.getByTestId("beginner-start-card")).toContainText("Export Task");
+
+  await page.getByTestId("start-card-connect-gateway").click();
+  await expect(page.getByTestId("gateway-quick-connect-status")).toContainText("Connected");
+  await expect(page.getByTestId("beginner-start-card")).toContainText("Local Gateway reachable");
+
+  await page.getByTestId("start-card-export-task").click();
+  await expect(page.getByTestId("openclaw-task-preview")).toBeVisible();
+  await page.getByTitle("Close JSON export").evaluate((element) => {
+    (element as HTMLButtonElement).click();
+  });
+
+  await minimizeWorkspacePanels(page);
+  await page.getByTestId(NODE_IDS.worker).click();
+  await expect
+    .poll(() =>
+      page
+        .getByTestId("inspector-advanced-settings")
+        .evaluate((element) => (element as HTMLDetailsElement).open)
+    )
+    .toBe(false);
+
+  await page.getByTestId("experience-mode-select").selectOption("advanced");
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-experience-mode", "advanced");
+  await expect(page.getByTestId("beginner-start-card")).toHaveCount(0);
+  await expect(page.getByTestId("node-library-summary")).toContainText("5 nodes");
+  await expect(page.getByTestId("node-library-item-agent-start")).toContainText("Start Agent");
+  await expect
+    .poll(() =>
+      page
+        .getByTestId("inspector-advanced-settings")
+        .evaluate((element) => (element as HTMLDetailsElement).open)
+    )
+    .toBe(true);
+  await expect(page.getByTestId("inspector-runtime-select")).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByTestId("experience-mode-select")).toHaveValue("advanced");
+  await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-experience-mode", "advanced");
+  await expect(page.getByTestId("beginner-start-card")).toHaveCount(0);
+  expect(runRequests).toBe(0);
+});
+
 test("demo guide explains the beta path and reset demo flow restores defaults", async ({ page }) => {
   await page.getByLabel("Language").selectOption("en");
 
@@ -187,6 +278,8 @@ test("demo guide explains the beta path and reset demo flow restores defaults", 
   );
   await page.getByTestId("demo-guide-button").click();
   await expect(page.getByTestId("demo-guide-panel")).toBeVisible();
+  await expect(page.getByTestId("demo-guide-quick-test")).toContainText("Hello World");
+  await expect(page.getByTestId("start-hello-world-button")).toBeVisible();
   await expect(page.getByTestId("demo-guide-path")).toContainText("Builder preset");
   await expect(page.getByTestId("demo-guide-path")).toContainText("mock-local");
   await expect(page.getByTestId("beta-limitations")).toContainText("mock-local");
@@ -305,6 +398,7 @@ test("runtime manager shows OpenClaw dogfood boundary and exports manual task", 
 
   await minimizeWorkspacePanels(page);
   await page.getByTestId(NODE_IDS.worker).click();
+  await openAdvancedInspectorSettings(page);
   await expect(page.getByTestId("inspector-gateway-section")).toBeVisible();
   await expect(page.getByTestId("inspector-gateway-status")).toContainText("Workspace Default Gateway");
   await expect(page.getByTestId("inspector-gateway-status")).toContainText("Connected");
@@ -475,6 +569,7 @@ test("gateway profile manager creates, binds, exports, and clears custom profile
 
   await page.getByTitle("Close Runtime Manager").click();
   await page.getByTestId(NODE_IDS.worker).click();
+  await openAdvancedInspectorSettings(page);
   await page.getByTestId("inspector-runtime-select").selectOption("openclaw-local");
   await page.getByTestId("inspector-gateway-binding-mode").selectOption("profile");
   await page.getByTestId("inspector-gateway-profile-select").selectOption("openclaw-local-2");
@@ -553,6 +648,7 @@ test("gateway profile manager creates, binds, exports, and clears custom profile
   await page.getByTestId("reset-demo-flow-button").click();
   await page.keyboard.press("Escape");
   await page.getByTestId(NODE_IDS.worker).click();
+  await openAdvancedInspectorSettings(page);
   await expect(page.getByTestId("inspector-gateway-binding-mode")).toHaveValue("workspace-default");
   await expect(page.getByTestId(`${NODE_IDS.worker}-gateway-badge`)).toBeHidden();
 
@@ -587,11 +683,60 @@ test("task launcher generates protected template flows and manual export metadat
   );
   await page.getByTestId("task-launcher-button").click();
   await expect(page.getByTestId("task-launcher-panel")).toBeVisible();
+  await expect(page.getByTestId("task-template-gallery").locator("button").first()).toContainText(
+    "Hello World Agent Flow"
+  );
+  await expect(page.getByTestId("task-template-hello-world")).toContainText("Recommended");
+  await expect(page.getByTestId("task-template-hello-world")).toContainText("Mock-safe");
+  await expect(page.getByTestId("task-template-hello-world")).toContainText("1 min");
   await expect(page.getByTestId("task-template-gallery")).toContainText(
     "Excel to Word / Markdown / Summary"
   );
   await expect(page.getByTestId("task-template-preview")).toContainText("Manual export only");
 
+  page.once("dialog", (dialog) => {
+    expect(dialog.message()).toContain("Template will replace");
+    void dialog.accept();
+  });
+  await page.getByTestId("task-create-flow-button").click();
+  await expect(page.getByTestId("task-launcher-panel")).toHaveCount(0);
+  await expect(page.getByTestId("node-template-hello-manual")).toBeVisible();
+  await expect(page.getByTestId("node-template-hello-worker")).toBeVisible();
+  await expect(page.getByTestId("node-template-hello-output")).toBeVisible();
+  await expect.poll(() => edgeCount(page)).toBe(2);
+  expect(runRequests).toBe(0);
+
+  await page.getByTestId("demo-guide-button").evaluate((element) =>
+    element.scrollIntoView({ block: "nearest", inline: "center" })
+  );
+  await page.getByTestId("demo-guide-button").click();
+  await expect(page.getByTestId("demo-guide-quick-test")).toContainText("Hello World");
+  page.once("dialog", (dialog) => {
+    expect(dialog.message()).toContain("Template will replace");
+    void dialog.accept();
+  });
+  await page.getByTestId("start-hello-world-button").click();
+  await expect(page.getByTestId("demo-guide-panel")).toHaveCount(0);
+  await expect(page.getByTestId("node-template-hello-worker")).toBeVisible();
+  expect(runRequests).toBe(0);
+
+  await createTemplateFlow(page, "task-template-mock-agent-demo", async () => {});
+  await expect(page.getByTestId("node-template-mock-worker")).toBeVisible();
+  await expect.poll(() => edgeCount(page)).toBe(4);
+
+  await createTemplateFlow(page, "task-template-protected-dry-run-demo", async () => {});
+  await expect(page.getByTestId("node-template-protected-worker")).toBeVisible();
+  await expect.poll(() => edgeCount(page)).toBe(4);
+
+  await createTemplateFlow(page, "task-template-blank-flow", async () => {});
+  await expect(page.getByTestId("node-template-protected-worker")).toHaveCount(0);
+  await expect.poll(() => edgeCount(page)).toBe(0);
+
+  await page.getByTestId("task-launcher-button").evaluate((element) =>
+    element.scrollIntoView({ block: "nearest", inline: "center" })
+  );
+  await page.getByTestId("task-launcher-button").click();
+  await expect(page.getByTestId("task-launcher-panel")).toBeVisible();
   await page.getByTestId("task-template-excel-report").click();
   await page.getByTestId("task-excel-name-input").fill("Finance workbook brief");
   await page.getByTestId("task-excel-path-input").fill("/Users/demo/input.xlsx");
@@ -615,6 +760,7 @@ test("task launcher generates protected template flows and manual export metadat
 
   await minimizeWorkspacePanels(page);
   await page.getByTestId("node-template-excel-reader").click();
+  await openAdvancedInspectorSettings(page);
   await expect(page.getByTestId("inspector-gateway-section")).toBeVisible();
   await expect(page.getByTestId("inspector-gateway-binding-mode")).toHaveValue("workspace-default");
   await expect(page.getByTestId("inspector-gateway-status")).toContainText(
@@ -705,10 +851,74 @@ test("first-run empty states give actionable local demo guidance", async ({ page
   await page.getByTestId("context-menu-clear-selection").click();
 
   await expect(page.getByTestId("inspector-pane")).toContainText("No Node Selected");
-  await expect(page.getByTestId("inspector-pane")).toContainText("Open Guide");
+  await expect(page.getByTestId("inspector-pane")).toContainText("start with Hello World");
   await expect(page.getByTestId("run-inspector")).toContainText("Click Run to execute the safe mock demo");
   await expect(page.getByTestId("run-inspector")).toContainText("Run the mock flow");
   await expect(page.getByTestId("run-readiness-preview")).toContainText("Advisory preflight");
+});
+
+test("simple node setup edits task connection and output without running", async ({ page }) => {
+  let runRequests = 0;
+
+  page.on("request", (request) => {
+    if (new URL(request.url()).pathname === "/api/runs") {
+      runRequests += 1;
+    }
+  });
+
+  await minimizeWorkspacePanels(page);
+  await page.getByTestId(NODE_IDS.worker).click();
+  await expect(page.getByTestId("simple-node-setup")).toBeVisible();
+  await expect(page.getByTestId("simple-node-setup")).toContainText("Simple setup");
+  await expect(page.getByTestId("simple-node-setup")).toContainText("Preview-safe");
+  await expect(page.getByTestId("simple-setup-status")).toContainText("Protected");
+  await expect
+    .poll(() =>
+      page
+        .getByTestId("inspector-advanced-settings")
+        .evaluate((element) => (element as HTMLDetailsElement).open)
+    )
+    .toBe(false);
+
+  await page
+    .getByTestId("simple-task-input")
+    .fill("Summarize https://example.com for private beta review.");
+  await page.getByTestId("simple-connection-type-select").selectOption("url");
+  await page.getByTestId("simple-connection-value-input").fill("https://example.com");
+  await page.getByTestId("simple-output-format-select").selectOption("markdown");
+  await expect(page.getByTestId("simple-setup-status")).toContainText("No fetch is performed");
+
+  await page.getByTestId("simple-connection-type-select").selectOption("gateway-profile");
+  await expect(page.getByTestId("simple-gateway-profile-select")).toBeVisible();
+  await expect(page.getByTestId("simple-setup-status")).toContainText("Protected");
+
+  await openAdvancedInspectorSettings(page);
+  await expect(page.getByTestId("inspector-runtime-select")).toBeVisible();
+  await expect(page.getByTestId("inspector-gateway-binding-mode")).toHaveValue("profile");
+
+  await page.getByTestId("export-json-button").evaluate((element) =>
+    element.scrollIntoView({ block: "nearest", inline: "center" })
+  );
+  await page.getByTestId("export-json-button").click();
+  await expect(page.getByTestId("flow-json-export")).toBeVisible();
+  const flowJson = JSON.parse(await page.getByTestId("flow-json-export").innerText());
+  expect(flowJson.nodes).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({
+        id: "node.agent.worker",
+        data: expect.objectContaining({
+          objective: "Summarize https://example.com for private beta review.",
+          simpleSetup: expect.objectContaining({
+            task: "Summarize https://example.com for private beta review.",
+            connectionType: "gateway-profile",
+            connectionValue: "",
+            outputFormat: "markdown"
+          })
+        })
+      })
+    ])
+  );
+  expect(runRequests).toBe(0);
 });
 
 test("workspace view modes hide, restore, and persist layout preferences", async ({ page }) => {
@@ -718,9 +928,9 @@ test("workspace view modes hide, restore, and persist layout preferences", async
   await expect(page.getByTestId("node-library")).toBeVisible();
   await expect(page.getByTestId("inspector-pane")).toBeVisible();
   await expect(page.getByTestId("session-console-panel")).toBeVisible();
-  await expect(page.getByTestId("execution-contract-preview-panel")).toBeVisible();
-  await expect(page.getByTestId("linear-execution-plan-panel")).toBeVisible();
-  await expect(page.getByTestId("resource-estimate-panel")).toBeVisible();
+  await expect(page.getByTestId("execution-contract-preview-panel")).toBeHidden();
+  await expect(page.getByTestId("linear-execution-plan-panel")).toBeHidden();
+  await expect(page.getByTestId("resource-estimate-panel")).toBeHidden();
   await expect(page.getByTestId("run-inspector")).toBeVisible();
   await expect(page.getByTestId("execution-action-strip")).toBeVisible();
   await expectRunButtonInExecutionStrip(page);
@@ -776,8 +986,8 @@ test("workspace view modes hide, restore, and persist layout preferences", async
   await page.getByTestId("view-mode-select").selectOption("default");
   await expect(page.getByTestId("studio-shell")).toHaveAttribute("data-workspace-mode", "default");
   await expect(page.getByTestId("node-library")).toBeVisible();
-  await expect(page.getByTestId("linear-execution-plan-panel")).toBeVisible();
-  await expect(page.getByTestId("resource-estimate-panel")).toBeVisible();
+  await expect(page.getByTestId("linear-execution-plan-panel")).toBeHidden();
+  await expect(page.getByTestId("resource-estimate-panel")).toBeHidden();
   await expect(page.getByTestId("run-inspector")).toBeVisible();
 });
 
@@ -796,6 +1006,11 @@ test("node display modes switch, auto-map workspace modes, and persist", async (
     "Detailed",
     "Trace"
   ]);
+  await expect(workerNode).toHaveAttribute("data-node-display-mode", "compact");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-compact-meta`)).toContainText("Does one task");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-compact-meta`)).not.toContainText("agent.worker");
+
+  await page.getByTestId("experience-mode-select").selectOption("advanced");
   await expect(workerNode).toHaveAttribute("data-node-display-mode", "standard");
   await expect(page.getByTestId(`${NODE_IDS.worker}-meta`)).toBeVisible();
   await expect(page.getByTestId(`${NODE_IDS.worker}-estimate-badge`)).toBeVisible();
@@ -888,7 +1103,7 @@ test("workspace presets apply scenario layouts and reset restores the default sh
   await expect(page.getByTestId("node-library")).toHaveAttribute("data-collapsed", "false");
   await expect(page.getByTestId("inspector-pane")).toHaveAttribute("data-collapsed", "false");
   await expect(page.getByTestId("run-inspector")).toHaveAttribute("data-collapsed", "false");
-  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "standard");
+  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "compact");
 });
 
 test("run readiness preview shows localized advisory issues", async ({ page }) => {
@@ -1007,6 +1222,7 @@ test("run readiness preview can render a clean ready state", async ({ page }) =>
 });
 
 test("preview panels ignore stale slower responses after a newer semantic refresh", async ({ page }) => {
+  await page.getByTestId("experience-mode-select").selectOption("advanced");
   const pendingResponses = await installControlledPreviewRoutes(page);
 
   await page.reload();
@@ -1038,6 +1254,7 @@ test("preview panels ignore stale slower responses after a newer semantic refres
 });
 
 test("resource estimate panel shows summaries, localized warnings, and unknown cost as non-fatal", async ({ page }) => {
+  await page.getByTestId("experience-mode-select").selectOption("advanced");
   const panel = page.getByTestId("resource-estimate-panel");
 
   await expect(panel).toBeVisible();
@@ -1059,6 +1276,7 @@ test("resource estimate panel shows summaries, localized warnings, and unknown c
 });
 
 test("resource estimate refreshes for semantic graph changes but not node position drags", async ({ page }) => {
+  await page.getByTestId("experience-mode-select").selectOption("advanced");
   await expect(page.getByTestId("resource-estimate-status")).toContainText(/Partial|Complete/);
 
   let estimateRequests = 0;
@@ -1107,7 +1325,7 @@ test("node dragging keeps the node interactable", async ({ page }) => {
 
   const after = await getBoundingBox(node);
   expect(Math.abs(after.x - before.x) + Math.abs(after.y - before.y)).toBeGreaterThan(20);
-  await expect(node).toContainText("Manual Trigger");
+  await expect(node).toContainText("Start");
 });
 
 test("edge deletion and delete-plus-reconnect path works", async ({ page }) => {
@@ -1175,6 +1393,11 @@ test("node context menu can inspect, duplicate, and delete nodes", async ({ page
 
   await page.getByTestId(NODE_IDS.worker).click({ button: "right" });
   await page.getByTestId("context-menu-show-details").click();
+  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "compact");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-meta`)).toBeHidden();
+
+  await page.getByTestId(NODE_IDS.worker).click({ button: "right" });
+  await page.getByTestId("context-menu-display-standard").click();
   await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "standard");
   await expect(page.getByTestId(`${NODE_IDS.worker}-meta`)).toBeVisible();
 
@@ -1186,7 +1409,7 @@ test("node context menu can inspect, duplicate, and delete nodes", async ({ page
   await page.getByTestId(NODE_IDS.worker).click({ button: "right" });
   await expect(page.getByTestId("context-menu-display-detailed")).toHaveAttribute("data-active", "true");
   await page.getByTestId("context-menu-display-follow-global").click();
-  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "standard");
+  await expect(page.getByTestId(NODE_IDS.worker)).toHaveAttribute("data-node-display-mode", "compact");
 
   await page.getByTestId(NODE_IDS.worker).click({ button: "right" });
   await page.getByTestId("context-menu-duplicate-node").click();
@@ -1268,6 +1491,8 @@ test("cycle diagnostics are shown without crashing the canvas", async ({ page })
 });
 
 test("floating panels minimize, restore, and drag by header", async ({ page }) => {
+  await page.getByTestId("experience-mode-select").selectOption("advanced");
+
   await assertPanelToggle(page, "session-console-panel", "session-console-toggle");
   await assertPanelToggle(
     page,
@@ -1441,6 +1666,7 @@ test("panel bodies scroll independently without moving the canvas", async ({ pag
 });
 
 test("mock run reaches success and updates live step status", async ({ page }) => {
+  await page.getByTestId("experience-mode-select").selectOption("advanced");
   await page.getByTestId("run-button").click();
 
   await expect(page.locator(".top-status")).toContainText("success", { timeout: 15_000 });
@@ -1448,6 +1674,16 @@ test("mock run reaches success and updates live step status", async ({ page }) =
   await expect(page.getByTestId("run-inspector")).toContainText("execution.plan.completed");
   await expect(page.getByTestId("linear-execution-plan-panel")).toContainText("Live: Completed");
   await expect(page.getByTestId(NODE_IDS.worker)).toContainText("success");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-outcome`)).toContainText("Purpose");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-outcome`)).toContainText("Latest result");
+  await expect(page.getByTestId(`${NODE_IDS.worker}-outcome`)).toContainText("Mock worker completed");
+
+  await minimizeWorkspacePanels(page);
+  await page.getByTestId(NODE_IDS.worker).click();
+  await expect(page.getByTestId("inspector-node-outcome")).toContainText("Purpose");
+  await expect(page.getByTestId("inspector-node-outcome")).toContainText("Latest result");
+  await expect(page.getByTestId("inspector-node-outcome")).toContainText("Mock worker completed");
+  await expect(page.getByTestId("node-io-output-summary")).toContainText("Mock worker completed");
 });
 
 test("runtime protection smoke paths stay unchanged", async ({ request }) => {
@@ -1555,7 +1791,11 @@ async function minimizeWorkspacePanels(page: Page): Promise<void> {
     "linear-execution-plan-toggle",
     "resource-estimate-toggle"
   ]) {
-    await page.getByTestId(testId).click({ force: true });
+    const toggle = page.getByTestId(testId);
+
+    if ((await toggle.count()) > 0) {
+      await toggle.click({ force: true });
+    }
   }
 }
 
@@ -1580,6 +1820,19 @@ async function createTemplateFlow(
   await expect(page.getByTestId("task-launcher-panel")).toHaveCount(0);
 }
 
+async function openAdvancedInspectorSettings(page: Page): Promise<void> {
+  const advancedSettings = page.getByTestId("inspector-advanced-settings");
+  await expect(advancedSettings).toBeVisible();
+
+  const isOpen = await advancedSettings.evaluate(
+    (element) => (element as HTMLDetailsElement).open
+  );
+
+  if (!isOpen) {
+    await page.getByTestId("inspector-advanced-summary").click();
+  }
+}
+
 async function openCanvasContextMenu(page: Page): Promise<void> {
   const canvas = await getBoundingBox(page.getByTestId("clawflow-canvas"));
 
@@ -1595,6 +1848,10 @@ async function openCanvasContextMenuAt(page: Page, x: number, y: number): Promis
 }
 
 async function restoreLinearPlanPanel(page: Page): Promise<void> {
+  if ((await page.getByTestId("linear-execution-plan-panel").count()) === 0) {
+    await page.getByTestId("experience-mode-select").selectOption("advanced");
+  }
+
   const panel = page.getByTestId("linear-execution-plan-panel");
 
   if (!(await panel.textContent()).includes("Plan status")) {
@@ -1797,6 +2054,7 @@ async function expectTopBarControlsReachable(page: Page): Promise<void> {
   const topBar = page.getByTestId("top-bar");
 
   for (const testId of [
+    "experience-mode-control",
     "workspace-preset-control",
     "view-mode-control",
     "node-display-mode-control",
@@ -1808,12 +2066,27 @@ async function expectTopBarControlsReachable(page: Page): Promise<void> {
     "reset-layout-button"
   ]) {
     const control = page.getByTestId(testId);
-    await control.evaluate((element) =>
-      element.scrollIntoView({ block: "nearest", inline: "center" })
-    );
+    await scrollTopBarControlIntoView(control);
     await expect(control).toBeVisible();
     await expectInsideContainerViewport(control, topBar);
   }
+}
+
+async function scrollTopBarControlIntoView(locator: ReturnType<Page["locator"]>): Promise<void> {
+  await locator.evaluate((element) => {
+    const actions = element.closest('[data-testid="workspace-actions"]');
+
+    if (actions instanceof HTMLElement) {
+      const actionRect = actions.getBoundingClientRect();
+      const elementRect = element.getBoundingClientRect();
+      actions.scrollLeft +=
+        elementRect.left -
+        actionRect.left -
+        Math.max(0, (actionRect.width - elementRect.width) / 2);
+    }
+
+    element.scrollIntoView({ block: "nearest", inline: "center" });
+  });
 }
 
 async function expectInsideContainerViewport(
