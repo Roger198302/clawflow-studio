@@ -78,10 +78,12 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useSessionsStore } from '@/stores'
 import SessionCard from '@/components/SessionCard.vue'
 import type { FlowSession } from '@/types'
 
+const router = useRouter()
 const sessionsStore = useSessionsStore()
 
 const showCreate = ref(false)
@@ -124,8 +126,7 @@ async function handleCreate() {
 }
 
 function openSession(session: FlowSession) {
-  // TODO: navigate to session detail view when implemented
-  console.info('Session clicked:', session.id)
+  router.push({ name: 'session-detail', params: { id: session.id } })
 }
 
 onMounted(async () => {

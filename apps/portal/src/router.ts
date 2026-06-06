@@ -6,6 +6,7 @@ const router = createRouter({
   routes: [
     { path: '/', name: 'dashboard', component: Dashboard },
     { path: '/flows', name: 'flows', component: () => import('./views/Flows.vue') },
+    { path: '/flows/:id', name: 'session-detail', component: () => import('./views/SessionDetail.vue') },
     { path: '/agents', name: 'agents', component: () => import('./views/Agents.vue') },
     { path: '/settings', name: 'settings', component: () => import('./views/Settings.vue') },
   ],
