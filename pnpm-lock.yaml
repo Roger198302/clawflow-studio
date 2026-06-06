@@ -51,6 +51,9 @@ importers:
 
   apps/portal:
     dependencies:
+      '@clawflow/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       axios:
         specifier: ^1.7.0
         version: 1.17.0
