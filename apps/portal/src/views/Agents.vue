@@ -5,7 +5,67 @@
         <h1>Agents</h1>
         <p class="muted">Runtime agents and their current status</p>
       </div>
-      <button class="btn-ghost" @click="refresh">Refresh</button>
+      <div class="topbar-actions">
+        <button class="btn-ghost" @click="refresh">Refresh</button>
+        <button class="btn-primary" @click="showRegister = true">+ Register Runtime</button>
+      </div>
+    </div>
+
+    <!-- Register Runtime modal -->
+    <div v-if="showRegister" class="modal-overlay" @click.self="closeModal">
+      <div class="modal">
+        <h2>Register Runtime</h2>
+        <form @submit.prevent="handleRegister">
+          <div class="field">
+            <label>Name <span class="required">*</span></label>
+            <input v-model="form.name" type="text" placeholder="e.g. claude-code-dev" required />
+          </div>
+          <div class="field">
+            <label>Type <span class="required">*</span></label>
+            <select v-model="form.type" required>
+              <option value="">Select type...</option>
+              <option value="openclaw">openclaw</option>
+              <option value="mock">mock</option>
+              <option value="hermes">hermes</option>
+              <option value="codex">codex</option>
+              <option value="claude-code">claude-code</option>
+              <option value="shell">shell</option>
+              <option value="mcp">mcp</option>
+              <option value="http">http</option>
+              <option value="custom">custom</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Execution Mode <span class="required">*</span></label>
+            <select v-model="form.executionMode" required>
+              <option value="">Select mode...</option>
+              <option value="mock">mock</option>
+              <option value="protected">protected</option>
+              <option value="unavailable">unavailable</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Endpoint <span class="optional">(optional)</span></label>
+            <input v-model="form.endpoint" type="text" placeholder="e.g. ws://localhost:9222" />
+          </div>
+          <div class="field">
+            <label>Command <span class="optional">(optional)</span></label>
+            <input v-model="form.command" type="text" placeholder="e.g. npx claude-code" />
+          </div>
+          <div class="field">
+            <label>Description <span class="optional">(optional)</span></label>
+            <input v-model="form.description" type="text" placeholder="Brief description" />
+          </div>
+          <div v-if="registerError" class="error-msg">⚠ {{ registerError }}</div>
+          <div v-if="registerSuccess" class="success-msg">✅ Runtime registered successfully.</div>
+          <div class="modal-actions">
+            <button type="button" class="btn-ghost" @click="closeModal">Cancel</button>
+            <button type="submit" class="btn-primary" :disabled="registering">
+              {{ registering ? 'Registering...' : 'Register' }}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
 
     <div v-if="gateway.loading" class="loading-msg">Loading runtimes...</div>
@@ -88,13 +148,64 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useGatewayStore } from '@/stores'
+import { registerRuntime } from '@/api'
+import type { RuntimeType, RuntimeExecutionMode } from '@/types'
 import StatusDot from '@/components/StatusDot.vue'
 import StatusBadge from '@/components/StatusBadge.vue'
 
 const gateway = useGatewayStore()
 
+// ─── Register modal ───────────────────────────────────────────────────────────
+const showRegister = ref(false)
+const registering = ref(false)
+const registerError = ref<string | null>(null)
+const registerSuccess = ref(false)
+
+const form = reactive({
+  name: '',
+  type: '' as RuntimeType | '',
+  executionMode: '' as RuntimeExecutionMode | '',
+  endpoint: '',
+  command: '',
+  description: '',
+})
+
+function closeModal() {
+  showRegister.value = false
+  registerError.value = null
+  registerSuccess.value = false
+  Object.assign(form, { name: '', type: '', executionMode: '', endpoint: '', command: '', description: '' })
+}
+
+async function handleRegister() {
+  if (!form.name || !form.type || !form.executionMode) return
+  registering.value = true
+  registerError.value = null
+  registerSuccess.value = false
+  try {
+    await registerRuntime({
+      id: `runtime-${Date.now()}`,
+      name: form.name,
+      type: form.type as RuntimeType,
+      executionMode: form.executionMode as RuntimeExecutionMode,
+      endpoint: form.endpoint || undefined,
+      command: form.command || undefined,
+      description: form.description || undefined,
+      capabilities: [],
+    })
+    registerSuccess.value = true
+    await gateway.fetchStatus()
+    setTimeout(closeModal, 1200)
+  } catch (e: unknown) {
+    registerError.value = e instanceof Error ? e.message : 'Failed to register runtime'
+  } finally {
+    registering.value = false
+  }
+}
+
+// ─── Computed ──────────────────────────────────────────────────────────────────
 const onlineCount = computed(
   () =>
     gateway.status?.runtimes.filter(
@@ -102,6 +213,7 @@ const onlineCount = computed(
     ).length ?? 0
 )
 
+// ─── Refresh ──────────────────────────────────────────────────────────────────
 async function refresh() {
   await gateway.fetchStatus()
 }
@@ -120,6 +232,7 @@ onMounted(async () => {
   align-items: flex-start;
   margin-bottom: 2rem;
 }
+.topbar-actions { display: flex; gap: 0.5rem; }
 h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
 .muted { color: var(--color-text-muted); }
 .btn-ghost {
@@ -132,6 +245,17 @@ h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
   font-size: 0.85rem;
 }
 .btn-ghost:hover { border-color: var(--color-primary); color: var(--color-primary); }
+.btn-primary {
+  padding: 0.4rem 1rem;
+  background: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius);
+  color: #fff;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.btn-primary:hover { opacity: 0.85; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .summary-cards {
   display: grid;
@@ -204,4 +328,64 @@ h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
   font-size: 0.75rem;
   color: #f59e0b;
 }
+
+/* ─── Modal ───────────────────────────────────────────────────────────────── */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+.modal {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  padding: 1.75rem;
+  width: min(480px, 90vw);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.modal h2 { font-size: 1.2rem; margin-bottom: 1.25rem; }
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.25rem;
+}
+
+/* ─── Form fields ──────────────────────────────────────────────────────────── */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 1rem;
+}
+.field label {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  font-weight: 500;
+}
+.field .required { color: #ef4444; }
+.field .optional { color: var(--color-text-muted); font-weight: 400; font-size: 0.75rem; }
+.field input,
+.field select {
+  padding: 0.45rem 0.75rem;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  color: var(--color-text);
+  font-size: 0.85rem;
+  font-family: inherit;
+}
+.field input:focus,
+.field select:focus {
+  outline: none;
+  border-color: var(--color-primary);
+}
+
+.error-msg { color: #ef4444; font-size: 0.8rem; margin-top: 0.5rem; }
+.success-msg { color: #22c55e; font-size: 0.8rem; margin-top: 0.5rem; }
 </style>

@@ -45,6 +45,11 @@ export async function getRuntimeHealth(id: string): Promise<RuntimeHealth> {
   return data
 }
 
+export async function registerRuntime(runtime: Omit<RuntimeSpec, 'status' | 'lastHealthCheckAt' | 'errorMessage'>): Promise<RuntimeSpec> {
+  const { data } = await api.post('/runtimes', runtime)
+  return data
+}
+
 // ─── Sessions ─────────────────────────────────────────────────────────────────
 
 export async function listSessions(): Promise<FlowSession[]> {
