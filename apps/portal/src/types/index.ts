@@ -9,6 +9,7 @@ export type {
   SessionIntervention,
   RuntimeSpec,
   RuntimeHealth,
+  RuntimeExecutionMode,
   FlowEstimate,
   RunReadinessReport,
   LinearExecutionPlan,
